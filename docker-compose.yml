@@ -1,0 +1,116 @@
+# Full local stack. `make up` brings this online; `make demo` runs without it.
+services:
+  opensearch:
+    image: opensearchproject/opensearch:2.17.1
+    container_name: dp-opensearch
+    environment:
+      - discovery.type=single-node
+      - bootstrap.memory_lock=true
+      - "OPENSEARCH_JAVA_OPTS=-Xms1g -Xmx1g"
+      # Demo only. Never disable the security plugin on anything real.
+      - DISABLE_SECURITY_PLUGIN=true
+      - DISABLE_INSTALL_DEMO_CONFIG=true
+    ulimits:
+      memlock: { soft: -1, hard: -1 }
+      nofile: { soft: 65536, hard: 65536 }
+    ports: ["9200:9200", "9600:9600"]
+    volumes: [opensearch-data:/usr/share/opensearch/data]
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9200/_cluster/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+
+  dashboards:
+    image: opensearchproject/opensearch-dashboards:2.17.1
+    container_name: dp-dashboards
+    environment:
+      - OPENSEARCH_HOSTS=["http://opensearch:9200"]
+      - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
+    ports: ["5601:5601"]
+    depends_on:
+      opensearch: { condition: service_healthy }
+
+  postgresql:
+    image: postgres:16-alpine
+    container_name: dp-postgres
+    environment:
+      POSTGRES_PASSWORD: temporal
+      POSTGRES_USER: temporal
+    volumes: [temporal-db:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U temporal"]
+      interval: 5s
+      retries: 10
+
+  temporal:
+    image: temporalio/auto-setup:1.25.2
+    container_name: dp-temporal
+    environment:
+      - DB=postgres12
+      - DB_PORT=5432
+      - POSTGRES_USER=temporal
+      - POSTGRES_PWD=temporal
+      - POSTGRES_SEEDS=postgresql
+    ports: ["7233:7233"]
+    depends_on:
+      postgresql: { condition: service_healthy }
+
+  temporal-ui:
+    image: temporalio/ui:2.31.2
+    container_name: dp-temporal-ui
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - TEMPORAL_CORS_ORIGINS=http://localhost:3000
+    ports: ["8080:8080"]
+    depends_on: [temporal]
+
+  mock-directory:
+    build: { context: ., dockerfile: docker/Dockerfile }
+    container_name: dp-mock-directory
+    command: python -m directory_pipeline.fixtures.mock_directory
+    ports: ["8081:8081"]
+
+  mock-enrichment:
+    build: { context: ., dockerfile: docker/Dockerfile }
+    container_name: dp-mock-enrichment
+    command: python -m directory_pipeline.fixtures.mock_enrichment
+    ports: ["8082:8082"]
+
+  worker:
+    build: { context: ., dockerfile: docker/Dockerfile }
+    # No container_name: this service scales, and a fixed name must be unique.
+    command: dp-worker
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - OPENSEARCH_URL=http://opensearch:9200
+      - DIRECTORY_BASE_URL=http://mock-directory:8081
+      - ENRICHMENT_BASE_URL=http://mock-enrichment:8082
+      - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
+      - EXTRACTION_MODEL=${EXTRACTION_MODEL:-claude-opus-5}
+    depends_on:
+      opensearch: { condition: service_healthy }
+      temporal: { condition: service_started }
+    # In production this is the autoscaling target: scale on Temporal's
+    # task-queue backlog, not on CPU, because scrapers are I/O bound and
+    # sit near-idle while the queue is deep.
+    deploy:
+      replicas: 2
+
+  api:
+    build: { context: ., dockerfile: docker/Dockerfile }
+    container_name: dp-api
+    command: dp-api
+    environment:
+      - TEMPORAL_ADDRESS=temporal:7233
+      - OPENSEARCH_URL=http://opensearch:9200
+      - DIRECTORY_BASE_URL=http://mock-directory:8081
+      - ENRICHMENT_BASE_URL=http://mock-enrichment:8082
+    ports: ["8000:8000"]
+    depends_on:
+      opensearch: { condition: service_healthy }
+      temporal: { condition: service_started }
+
+volumes:
+  opensearch-data:
+  temporal-db:

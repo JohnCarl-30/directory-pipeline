@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push: { branches: [main] }
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: |
+          uv venv --python 3.12 .venv
+          uv pip install --python .venv/bin/python -e ".[dev]"
+
+      - name: Lint
+        run: |
+          .venv/bin/ruff check src tests scripts
+          .venv/bin/ruff format --check src tests scripts
+
+      - name: Test
+        # No services needed: the Temporal tests use the time-skipping test
+        # environment and the pipeline tests run against in-process mocks.
+        run: .venv/bin/python -m pytest -q
+
+      - name: End-to-end smoke run
+        # Proves the whole pipeline still wires together, not just the units.
+        # Exits non-zero if extraction, enrichment, or resolution breaks.
+        run: .venv/bin/python scripts/run_local.py
+
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build worker image
+        run: docker build -f docker/Dockerfile -t directory-pipeline:ci .
