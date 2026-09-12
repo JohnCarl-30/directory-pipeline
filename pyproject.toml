@@ -1,0 +1,56 @@
+[project]
+name = "directory-pipeline"
+version = "0.1.0"
+description = "Agentic directory crawl -> enrich -> resolve -> OpenSearch pipeline, orchestrated by Temporal"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "temporalio>=1.7",
+    "fastapi>=0.115",
+    "uvicorn[standard]>=0.32",
+    "httpx>=0.27",
+    "pydantic>=2.9",
+    "pydantic-settings>=2.6",
+    "opensearch-py[async]>=2.7",
+    "selectolax>=0.3.21",
+    "structlog>=24.4",
+    "pandas>=2.2",
+    "tenacity>=9.0",
+    "python-dotenv>=1.0",
+    "anthropic>=0.69",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.3",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.7",
+    "respx>=0.21",
+    "pytest-timeout>=2.3",
+]
+
+[project.scripts]
+dp-worker = "directory_pipeline.orchestration.worker:main"
+dp-api = "directory_pipeline.api.main:run"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/directory_pipeline"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+# A hung test is a failed test. Without this, a deadlocked workflow blocks CI
+# forever instead of reporting.
+timeout = 120
+filterwarnings = ["ignore::DeprecationWarning"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "ASYNC"]
+ignore = ["B008"]
