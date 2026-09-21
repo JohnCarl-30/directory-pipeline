@@ -11,10 +11,11 @@ Conflating them means a brief OpenSearch blip gets every pod restarted.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI
-from fastapi.responses import JSONResponse
+from fastapi.responses import FileResponse, JSONResponse
 
 from ..observability import METRICS
 from .deps import Resources, get_resources, lifespan
@@ -30,6 +31,8 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan,
 )
+
+_UI = Path(__file__).parent / "static" / "index.html"
 
 app.include_router(search_router)
 app.include_router(ingest_router)
@@ -67,10 +70,23 @@ async def metrics() -> dict[str, Any]:
     return METRICS.snapshot()
 
 
+@app.get("/ui", tags=["ops"], include_in_schema=False)
+async def ui() -> FileResponse:
+    """The search console.
+
+    One self-contained HTML file rather than a bundled frontend: this is a
+    Python service, and a build step plus a node_modules tree would cost more
+    than the page is worth. It talks to the same public endpoints any other
+    client would.
+    """
+    return FileResponse(_UI, media_type="text/html")
+
+
 @app.get("/", tags=["ops"])
 async def root() -> dict[str, Any]:
     return {
         "service": "directory-pipeline",
+        "ui": "/ui",
         "docs": "/docs",
         "endpoints": {
             "search": "/search?q=analytics&region=TX",

@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Directory Pipeline — search</title>
+<style>
+  :root {
+    --bg: #fbfbfa; --panel: #ffffff; --ink: #1a1a19; --soft: #6b6b66;
+    --line: #e4e4e0; --accent: #1f5f4e; --accent-soft: #eaf2ef;
+    --mark: #fdf0c8; --warn: #9a4b2f; --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 15px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  }
+  a { color: var(--accent); }
+
+  /* ---- header ---- */
+  header { border-bottom: 1px solid var(--line); background: var(--panel); }
+  .bar { max-width: 1240px; margin: 0 auto; padding: 16px 24px; display: flex; gap: 16px; align-items: center; }
+  .brand { font-weight: 650; letter-spacing: -0.01em; white-space: nowrap; }
+  .brand span { color: var(--soft); font-weight: 400; font-size: 13px; margin-left: 8px; }
+  form.search { flex: 1; display: flex; gap: 8px; }
+  input[type=text], input[type=number], select {
+    font: inherit; padding: 8px 11px; border: 1px solid var(--line);
+    border-radius: 7px; background: var(--panel); color: var(--ink); width: 100%;
+  }
+  input[type=text]:focus, select:focus { outline: 2px solid var(--accent-soft); border-color: var(--accent); }
+  button {
+    font: inherit; font-weight: 550; padding: 8px 16px; border-radius: 7px;
+    border: 1px solid var(--accent); background: var(--accent); color: #fff; cursor: pointer;
+  }
+  button.ghost { background: transparent; color: var(--soft); border-color: var(--line); }
+  button.ghost.on { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); }
+
+  .statsbar {
+    max-width: 1240px; margin: 0 auto; padding: 0 24px 12px;
+    display: flex; gap: 18px; align-items: center;
+    font: 12px/1 var(--mono); color: var(--soft);
+  }
+  .statsbar .spacer { flex: 1; }
+  .statsbar b { color: var(--ink); font-weight: 600; }
+
+  /* ---- layout: results left, filters right (Zendesk Reach) ---- */
+  main { max-width: 1240px; margin: 0 auto; padding: 22px 24px 60px;
+         display: grid; gap: 22px; grid-template-columns: minmax(0,1fr) 290px; align-items: start; }
+  @media (max-width: 900px) { main { grid-template-columns: minmax(0,1fr); } aside { order: -1; } }
+
+  /* ---- result rows ---- */
+  .row { background: var(--panel); border: 1px solid var(--line); border-radius: 9px; margin-bottom: 10px; }
+  .row.open { border-color: var(--accent); }
+  .rowhead { padding: 14px 16px; cursor: pointer; display: grid; gap: 5px; }
+  .rowhead:hover { background: #fcfcfb; }
+  .line1 { display: flex; align-items: baseline; gap: 10px; }
+  .name { font-weight: 600; font-size: 15.5px; }
+  .score { margin-left: auto; font: 11px var(--mono); color: var(--soft); white-space: nowrap; }
+  .meta { font-size: 13px; color: var(--soft); }
+  .meta .sep { opacity: .45; margin: 0 6px; }
+  .snippet { font-size: 13.5px; color: #3e3e3a; }
+  .snippet mark { background: var(--mark); padding: 0 2px; border-radius: 2px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 2px; }
+  .chip { font: 11px var(--mono); border: 1px solid var(--line); border-radius: 20px; padding: 2px 9px; color: var(--soft); }
+  .flag { font: 10px var(--mono); text-transform: uppercase; letter-spacing: .07em;
+          border-radius: 3px; padding: 2px 6px; background: #f3ede6; color: var(--warn); }
+  .why { font: 11px var(--mono); color: var(--accent); }
+
+  /* ---- expanded explain panel (Mixpanel dense grid) ---- */
+  .panel { border-top: 1px solid var(--line); padding: 14px 16px; background: #fcfcfb; border-radius: 0 0 9px 9px; }
+  .panel h4 { margin: 0 0 9px; font: 11px var(--mono); text-transform: uppercase;
+              letter-spacing: .08em; color: var(--soft); font-weight: 600; }
+  .kv { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 3px 18px; margin-bottom: 14px; }
+  .kv div { font: 11.5px var(--mono); display: flex; gap: 8px; padding: 2px 0; border-bottom: 1px dotted #eeeeea; }
+  .kv span:first-child { color: var(--soft); flex: 0 0 43%; }
+  .kv span:last-child { color: var(--ink); word-break: break-word; }
+  .tree { font: 11.5px/1.65 var(--mono); }
+  .tree .node { border-left: 2px solid var(--line); padding-left: 10px; margin-left: 3px; }
+  .tree .val { color: var(--accent); font-weight: 600; }
+  .tree .desc { color: #44443f; }
+
+  /* ---- filter sidebar ---- */
+  aside { background: var(--panel); border: 1px solid var(--line); border-radius: 9px; padding: 16px; position: sticky; top: 16px; }
+  .ahead { display: flex; align-items: center; margin-bottom: 4px; }
+  .ahead b { font-size: 13.5px; }
+  .ahead button { margin-left: auto; padding: 3px 9px; font-size: 12px; }
+  .group { margin-top: 16px; }
+  .group > h3 { margin: 0 0 8px; font: 10.5px var(--mono); text-transform: uppercase;
+                letter-spacing: .1em; color: var(--soft); font-weight: 600; }
+  .field { margin-bottom: 9px; }
+  .field label { display: block; font-size: 12px; color: var(--soft); margin-bottom: 3px; }
+  .opt { display: flex; align-items: center; gap: 7px; padding: 3px 0; font-size: 13px; cursor: pointer; }
+  .opt input { margin: 0; accent-color: var(--accent); }
+  .opt .n { margin-left: auto; font: 11px var(--mono); color: var(--soft); }
+  .opt.off { opacity: .45; }
+  .empty { padding: 34px 16px; text-align: center; color: var(--soft); font-size: 14px;
+           border: 1px dashed var(--line); border-radius: 9px; background: var(--panel); }
+  pre.json { background: #1d1d1b; color: #e8e8e2; padding: 16px; border-radius: 9px;
+             overflow: auto; font: 12px/1.6 var(--mono); max-height: 70vh; }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar">
+    <div class="brand">Directory Pipeline <span>search console</span></div>
+    <form class="search" id="f">
+      <input type="text" id="q" placeholder="Search companies — name, category, description…" autocomplete="off" />
+      <button type="submit">Search</button>
+    </form>
+  </div>
+  <div class="statsbar">
+    <span id="stats">ready</span>
+    <span class="spacer"></span>
+    <button class="ghost on" id="tabVisual" type="button">Visual</button>
+    <button class="ghost" id="tabJson" type="button">JSON</button>
+  </div>
+</header>
+
+<main>
+  <section id="results"></section>
+  <aside>
+    <div class="ahead"><b>Filters</b><button class="ghost" id="clear" type="button">Clear all</button></div>
+
+    <div class="group">
+      <h3>Location</h3>
+      <div class="field"><label>City</label><div id="fCity"></div></div>
+      <div class="field"><label>State / region</label>
+        <input type="text" id="fRegion" maxlength="2" placeholder="e.g. TX" /></div>
+    </div>
+
+    <div class="group">
+      <h3>Descriptors</h3>
+      <div class="field"><label>Industry</label><div id="fIndustry"></div></div>
+      <div class="field"><label>Category</label><div id="fCategory"></div></div>
+      <div class="field"><label>Technology (must have all)</label>
+        <input type="text" id="fTech" placeholder="e.g. stripe, react" /></div>
+    </div>
+
+    <div class="group">
+      <h3>Size</h3>
+      <div id="fBands"></div>
+    </div>
+
+    <div class="group">
+      <h3>Resolution</h3>
+      <label class="opt"><input type="checkbox" id="fDupes" />
+        <span>Include duplicates</span></label>
+    </div>
+  </aside>
+</main>
+
+<script>
+// The score explanation and facet counts come straight from OpenSearch, so this
+// page doubles as a relevance-debugging tool: every number shown is the number
+// the engine actually used to rank.
+const $ = (id) => document.getElementById(id);
+const state = { city: null, industry: null, category: null, band: null, raw: null, view: "visual" };
+const BANDS = { "1-10": [1,10], "11-50": [11,50], "51-200": [51,200], "201-1000": [201,1000], "1000+": [1001,null] };
+
+const esc = (s) => String(s ?? "").replace(/[&<>"]/g, (c) => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;" }[c]));
+// Escape everything, then re-allow only the <mark> tags OpenSearch inserted.
+const escHl = (s) => esc(s).replace(/&lt;(\/?)mark&gt;/g, "<$1mark>");
+const num = (n) => (n === null || n === undefined ? null : Number(n).toLocaleString());
+
+function queryString() {
+  const p = new URLSearchParams();
+  const q = $("q").value.trim();
+  if (q) p.set("q", q);
+  if (state.city) p.set("city", state.city);
+  if (state.industry) p.set("industry", state.industry);
+  if (state.category) p.append("category", state.category);
+  const region = $("fRegion").value.trim().toUpperCase();
+  if (region) p.set("region", region);
+  $("fTech").value.split(",").map((t) => t.trim()).filter(Boolean)
+    .forEach((t) => p.append("technology", t));
+  if (state.band) {
+    const [lo, hi] = BANDS[state.band];
+    if (lo !== null) p.set("min_employees", lo);
+    if (hi !== null) p.set("max_employees", hi);
+  }
+  if ($("fDupes").checked) p.set("include_duplicates", "true");
+  p.set("size", "25");
+  return p.toString();
+}
+
+async function runSearch() {
+  const qs = queryString();
+  $("stats").textContent = "searching…";
+  history.replaceState(null, "", qs ? "?" + qs : location.pathname);
+  let data;
+  try {
+    const res = await fetch("/search?" + qs);
+    data = await res.json();
+    if (!res.ok) throw new Error(data.detail || res.status);
+  } catch (err) {
+    $("stats").textContent = "error";
+    $("results").innerHTML = '<div class="empty">' + esc(err.message) +
+      "<br><br>Is the stack up? <code>make up</code>, then <code>make crawl</code> to load data.</div>";
+    return;
+  }
+  state.raw = data;
+  const bits = ["<b>" + num(data.total) + "</b> results"];
+  if (data.took_ms !== null && data.took_ms !== undefined) bits.push("<b>" + data.took_ms + "</b> ms");
+  if (data.max_score) bits.push("max score <b>" + data.max_score.toFixed(2) + "</b>");
+  $("stats").innerHTML = bits.join(" · ");
+  renderFacets(data.facets || {});
+  render();
+}
+
+function render() {
+  if (state.view === "json") {
+    $("results").innerHTML = '<pre class="json">' + esc(JSON.stringify(state.raw, null, 2)) + "</pre>";
+    return;
+  }
+  const rows = (state.raw?.results) || [];
+  if (!rows.length) {
+    $("results").innerHTML = '<div class="empty">No companies matched. Try clearing a filter.</div>';
+    return;
+  }
+  $("results").innerHTML = rows.map(rowHtml).join("");
+  document.querySelectorAll(".rowhead").forEach((el) => {
+    el.onclick = () => toggleExplain(el.parentElement, el.dataset.id);
+  });
+}
+
+function rowHtml(r) {
+  const city = r.address?.city, region = r.address?.region;
+  const place = [city, region].filter(Boolean).join(", ");
+  const meta = [];
+  if (r.employee_count) meta.push(num(r.employee_count) + " employees");
+  if (place) meta.push(place);
+  if (r.enrichment?.industry) meta.push(r.enrichment.industry);
+  const snippet = r._highlight?.description?.[0] || r.description || "";
+  const cats = (r.categories || []).slice(0, 5);
+  const techs = (r.enrichment?.technologies || []).slice(0, 5);
+  return `
+  <article class="row">
+    <div class="rowhead" data-id="${esc(r.record_id)}">
+      <div class="line1">
+        <span class="name">${esc(r.name || "(unnamed)")}</span>
+        ${r.is_canonical === false ? '<span class="flag">duplicate</span>' : ""}
+        <span class="score">score ${r._score ? r._score.toFixed(2) : "—"}</span>
+      </div>
+      ${meta.length ? `<div class="meta">${meta.map(esc).join('<span class="sep">·</span>')}</div>` : ""}
+      ${snippet ? `<div class="snippet">${escHl(snippet).slice(0, 400)}</div>` : ""}
+      ${(cats.length || techs.length) ? `<div class="chips">${
+        cats.map((c) => `<span class="chip">${esc(c)}</span>`).join("") +
+        techs.map((t) => `<span class="chip">${esc(t)}</span>`).join("")}</div>` : ""}
+      <div class="why">▸ why this ranked</div>
+    </div>
+  </article>`;
+}
+
+async function toggleExplain(row, id) {
+  const open = row.querySelector(".panel");
+  if (open) { open.remove(); row.classList.remove("open"); row.querySelector(".why").textContent = "▸ why this ranked"; return; }
+  row.classList.add("open");
+  row.querySelector(".why").textContent = "▾ why this ranked";
+  const panel = document.createElement("div");
+  panel.className = "panel";
+  panel.innerHTML = "<h4>loading…</h4>";
+  row.appendChild(panel);
+
+  const doc = state.raw.results.find((r) => r.record_id === id) || {};
+  const q = $("q").value.trim();
+  let explainHtml = "<h4>Score breakdown</h4><div class='tree'>" +
+    "<span class='desc'>Enter a query to see the relevance explanation.</span></div>";
+  if (q) {
+    try {
+      const res = await fetch(`/search/explain/${encodeURIComponent(id)}?q=${encodeURIComponent(q)}`);
+      const ex = await res.json();
+      const root = ex.explanation || ex;
+      explainHtml = "<h4>Score breakdown — why OpenSearch ranked this</h4><div class='tree'>" +
+        treeHtml(root) + "</div>";
+    } catch (err) {
+      explainHtml = "<h4>Score breakdown</h4><div class='tree'>" + esc(err.message) + "</div>";
+    }
+  }
+  panel.innerHTML = fieldsHtml(doc) + explainHtml;
+}
+
+// Flat key/value grid of the stored document — the dense properties panel.
+function fieldsHtml(d) {
+  const rows = [
+    ["record_id", d.record_id], ["source", d.source], ["source_id", d.source_id],
+    ["employees", num(d.employee_count)], ["founded", d.founded_year],
+    ["city", d.address?.city], ["region", d.address?.region], ["country", d.address?.country],
+    ["website", d.contact?.website], ["phone", d.contact?.phone_e164], ["email", d.contact?.email],
+    ["industry", d.enrichment?.industry], ["naics", d.enrichment?.naics],
+    ["revenue_usd", num(d.enrichment?.revenue_usd)],
+    ["enrichment confidence", d.enrichment?.confidence],
+    ["is_canonical", String(d.is_canonical)], ["cluster_id", d.cluster_id],
+    ["duplicate_of", d.duplicate_of],
+    ["resolution method", d.resolution?.method],
+    ["resolution confidence", d.resolution?.confidence],
+    ["completeness", d.completeness],
+  ].filter(([, v]) => v !== null && v !== undefined && v !== "" && v !== "undefined");
+  return "<h4>Stored document</h4><div class='kv'>" +
+    rows.map(([k, v]) => `<div><span>${esc(k)}</span><span>${esc(v)}</span></div>`).join("") +
+    "</div>";
+}
+
+// OpenSearch returns the explanation as a recursive {value, description, details} tree.
+function treeHtml(node, depth = 0) {
+  if (!node || depth > 6) return "";
+  const kids = (node.details || []).map((d) => treeHtml(d, depth + 1)).join("");
+  return `<div class="node"><span class="val">${
+    typeof node.value === "number" ? node.value.toFixed(4) : esc(node.value)
+  }</span> <span class="desc">${esc(node.description)}</span>${kids}</div>`;
+}
+
+function renderFacets(f) {
+  facetList("fCity", f.by_city, "city");
+  facetList("fIndustry", f.by_industry, "industry");
+  facetList("fCategory", f.by_category, "category");
+  bandList(f.employee_bands);
+}
+
+function facetList(elId, buckets, key) {
+  const el = $(elId);
+  if (!buckets || !buckets.length) { el.innerHTML = '<span class="opt off">no values</span>'; return; }
+  el.innerHTML = buckets.slice(0, 8).map((b) => `
+    <label class="opt${b.count ? "" : " off"}">
+      <input type="radio" name="${key}" value="${esc(b.key)}" ${state[key] === b.key ? "checked" : ""} />
+      <span>${esc(b.key)}</span><span class="n">${num(b.count)}</span>
+    </label>`).join("");
+  el.querySelectorAll("input").forEach((input) => {
+    input.onclick = () => {
+      // Clicking the selected radio again clears the filter.
+      state[key] = state[key] === input.value ? null : input.value;
+      if (state[key] === null) input.checked = false;
+      runSearch();
+    };
+  });
+}
+
+// Employee buckets come from the backend's range aggregation, so the counts are
+// real rather than guessed at in the browser.
+function bandList(buckets) {
+  const el = $("fBands");
+  const counts = Object.fromEntries((buckets || []).map((b) => [b.key, b.count]));
+  el.innerHTML = ['<label class="opt"><input type="radio" name="band" value=""' +
+      (state.band ? "" : " checked") + " /><span>Any size</span></label>"]
+    .concat(Object.keys(BANDS).map((k) => `
+      <label class="opt${counts[k] ? "" : " off"}">
+        <input type="radio" name="band" value="${k}" ${state.band === k ? "checked" : ""} />
+        <span>${k}</span><span class="n">${counts[k] === undefined ? "" : num(counts[k])}</span>
+      </label>`)).join("");
+  el.querySelectorAll("input").forEach((input) => {
+    input.onclick = () => { state.band = input.value || null; runSearch(); };
+  });
+}
+
+$("f").onsubmit = (e) => { e.preventDefault(); runSearch(); };
+$("fRegion").onchange = runSearch;
+$("fTech").onchange = runSearch;
+$("fDupes").onchange = runSearch;
+$("clear").onclick = () => {
+  Object.assign(state, { city: null, industry: null, category: null, band: null });
+  $("fRegion").value = ""; $("fTech").value = ""; $("fDupes").checked = false;
+  runSearch();
+};
+$("tabVisual").onclick = () => {
+  state.view = "visual"; $("tabVisual").classList.add("on"); $("tabJson").classList.remove("on"); render();
+};
+$("tabJson").onclick = () => {
+  state.view = "json"; $("tabJson").classList.add("on"); $("tabVisual").classList.remove("on"); render();
+};
+
+// Restore state from the URL so a search is shareable and survives reload.
+(function boot() {
+  const p = new URLSearchParams(location.search);
+  $("q").value = p.get("q") || "";
+  state.city = p.get("city"); state.industry = p.get("industry"); state.category = p.get("category");
+  $("fRegion").value = p.get("region") || "";
+  $("fTech").value = p.getAll("technology").join(", ");
+  $("fDupes").checked = p.get("include_duplicates") === "true";
+  const lo = p.get("min_employees"), hi = p.get("max_employees");
+  if (lo || hi) {
+    state.band = Object.keys(BANDS).find((k) =>
+      String(BANDS[k][0]) === lo && String(BANDS[k][1] ?? "") === (hi ?? "")) || null;
+  }
+  runSearch();
+})();
+</script>
+</body>
+</html>
