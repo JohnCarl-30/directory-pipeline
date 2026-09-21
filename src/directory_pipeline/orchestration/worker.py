@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import signal
+from datetime import timedelta
 from typing import Any
 
 from temporalio.client import Client
@@ -72,6 +73,9 @@ async def run_worker() -> None:
         ],
         max_concurrent_activities=settings.crawl_concurrency * 4,
         max_concurrent_workflow_tasks=100,
+        # A crawl activity can be mid-fetch when the pod is cycled. Give it
+        # time to land rather than cancelling it and retrying the work.
+        graceful_shutdown_timeout=timedelta(seconds=30),
     )
 
     stop = asyncio.Event()
@@ -86,7 +90,8 @@ async def run_worker() -> None:
         address=settings.temporal_address,
     )
     try:
-        await worker.run(shutdown_event=stop)
+        async with worker:
+            await stop.wait()
     finally:
         await activities.aclose()
         log.info("worker.stopped")
