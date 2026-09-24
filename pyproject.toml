@@ -4,7 +4,7 @@ version = "0.1.0"
 description = "Agentic directory crawl -> enrich -> resolve -> OpenSearch pipeline, orchestrated by Temporal"
 requires-python = ">=3.11,<3.14"
 dependencies = [
-    "temporalio>=1.7",
+    "temporalio>=1.32,<2",
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
     "httpx>=0.27",
@@ -16,7 +16,7 @@ dependencies = [
     "pandas>=2.2",
     "tenacity>=9.0",
     "python-dotenv>=1.0",
-    "anthropic>=0.69",
+    "anthropic>=0.69,<2",
 ]
 
 [project.optional-dependencies]
