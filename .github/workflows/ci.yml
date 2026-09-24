@@ -15,9 +15,10 @@ jobs:
           enable-cache: true
 
       - name: Install
-        run: |
-          uv venv --python 3.12 .venv
-          uv pip install --python .venv/bin/python -e ".[dev]"
+        # --frozen installs exactly what uv.lock pins and fails if the lock is
+        # stale, so CI tests the dependency set the repo actually declares
+        # rather than whatever resolves that morning.
+        run: uv sync --frozen --all-extras
 
       - name: Lint
         run: |
@@ -34,9 +35,17 @@ jobs:
         # Exits non-zero if extraction, enrichment, or resolution breaks.
         run: .venv/bin/python scripts/run_local.py
 
-  build:
+  integration:
+    # Building the image proves it compiles, not that it runs. A worker that
+    # crash-looped on every start once passed this job's predecessor, and the
+    # unit suite, and the in-process smoke run -- because none of them ever
+    # started the container that ships. This job does.
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Build worker image
-        run: docker build -f docker/Dockerfile -t directory-pipeline:ci .
+
+      - name: Boot the stack and verify the deployable
+        env:
+          CI: "1"
+        run: ./scripts/verify_stack.sh
