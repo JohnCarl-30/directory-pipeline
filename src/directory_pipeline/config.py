@@ -48,6 +48,14 @@ class Settings(BaseSettings):
     extraction_model: str = "claude-opus-5"
     extraction_mode: str = "auto"  # auto | llm | dom
 
+    # Cost estimation, in USD per million tokens. Unset on purpose: token
+    # prices change, and /metrics/summary reporting a stale hardcoded rate as
+    # fact would be worse than reporting nothing. Fill these from current
+    # published pricing for whichever model extraction_model names.
+    llm_cost_input_per_mtok: float = 0.0
+    llm_cost_output_per_mtok: float = 0.0
+    llm_cost_cache_read_per_mtok: float = 0.0
+
     @field_validator("proxy_pool", mode="before")
     @classmethod
     def _split_pool(cls, v: object) -> object:
@@ -60,6 +68,16 @@ class Settings(BaseSettings):
         if self.opensearch_user:
             return (self.opensearch_user, self.opensearch_password)
         return None
+
+    @property
+    def llm_cost_rates(self) -> dict[str, float] | None:
+        """Configured token rates, or None when none were supplied."""
+        rates = {
+            "input": self.llm_cost_input_per_mtok,
+            "output": self.llm_cost_output_per_mtok,
+            "cache_read": self.llm_cost_cache_read_per_mtok,
+        }
+        return rates if any(rates.values()) else None
 
     @property
     def llm_extraction_enabled(self) -> bool:
