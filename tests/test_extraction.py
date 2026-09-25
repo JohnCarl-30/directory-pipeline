@@ -118,6 +118,42 @@ def test_text_layer_skips_the_directorys_own_host_and_social_links():
     assert TextFallbackExtractor().extract(listing)["website"] == "realcompany.io"
 
 
+def test_text_layer_recovers_a_description_from_prose():
+    """Drifted templates carry no meta description and no .company-description."""
+    listing = listing_for("cascade-freight", _drifted_page)
+    found = TextFallbackExtractor().extract(listing)
+
+    assert "description" in found
+    assert len(found["description"]) >= TextFallbackExtractor.DESCRIPTION_MIN_CHARS
+    # The contact sentence lives in its own paragraph and must not be mistaken
+    # for the description.
+    assert "@" not in found["description"]
+    assert "Reach the team" not in found["description"]
+
+
+def test_unclaimed_listing_boilerplate_is_not_a_description():
+    """A stub page has one paragraph, and it is placeholder copy.
+
+    Emitting it would be worse than emitting nothing: "This listing has not
+    been claimed" reads as real company copy everywhere downstream.
+    """
+    listing = listing_for("cascade-freight", _stub_page)
+    assert "description" not in TextFallbackExtractor().extract(listing)
+
+
+def test_a_paragraph_of_contact_details_is_not_a_description():
+    html = (
+        "<html><body><div>"
+        "<p>Based at 400 Congress Avenue, Austin, TX 78701. "
+        "Reach the team on 512-555-0142 or at hello@acme.example.</p>"
+        "</div></body></html>"
+    )
+    listing = RawListing(
+        source="test", source_id="acme", url="http://directory.test/company/acme", html=html
+    )
+    assert "description" not in TextFallbackExtractor().extract(listing)
+
+
 def test_text_layer_returns_nothing_for_a_page_with_no_facts():
     """Firing on the wrong thing is worse than not firing."""
     html = "<html><body><h1>Some Co</h1><p>This listing has not been claimed.</p></body></html>"

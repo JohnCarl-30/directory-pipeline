@@ -261,6 +261,18 @@ class TextFallbackExtractor:
         "example.com",
     }
 
+    # Placeholder prose on unclaimed listings. Emitting this as a description
+    # would be worse than emitting nothing: it reads as real copy downstream.
+    BOILERPLATE_RE = re.compile(
+        r"(has not been claimed|claim this (?:business|listing)|no description"
+        r"|description coming soon|under construction)",
+        re.IGNORECASE,
+    )
+    # Long enough to be a sentence about the company, short enough not to be
+    # the whole page flattened into one node.
+    DESCRIPTION_MIN_CHARS = 40
+    DESCRIPTION_MAX_CHARS = 600
+
     STRIP_SELECTORS = ("nav", "aside", "footer", "header", "script", "style", "noscript")
 
     def extract(self, listing: RawListing) -> dict[str, Any]:
@@ -276,6 +288,23 @@ class TextFallbackExtractor:
             return {}
 
         out: dict[str, Any] = {}
+
+        # Description needs paragraph structure, so it is read before the body
+        # is flattened. Contact prose ("Reach the team on 512-555-0142") lives
+        # in its own paragraph on drifted templates, so a paragraph carrying a
+        # phone, an email or a street address is skipped rather than guessed at.
+        for node in body.css("p"):
+            para = " ".join(node.text(separator=" ", strip=True).split())
+            if not (self.DESCRIPTION_MIN_CHARS <= len(para) <= self.DESCRIPTION_MAX_CHARS):
+                continue
+            if self.BOILERPLATE_RE.search(para):
+                continue
+            if self.EMAIL_RE.search(para) or self.PHONE_RE.search(para):
+                continue
+            if self.STREET_RE.search(para) or self.CITY_STATE_RE.search(para):
+                continue
+            out["description"] = para
+            break
         own_host = urlsplit(listing.url).netloc.lower().removeprefix("www.")
 
         if email := self.EMAIL_RE.search(text):
