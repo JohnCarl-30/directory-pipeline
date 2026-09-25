@@ -358,3 +358,82 @@ async def test_batch_workflow_exposes_its_stage_via_query(env):
         )
         await handle.result()
         assert await handle.query("stage") == "done"
+
+
+# --------------------------------------------------------------------------
+# Retry classification
+#
+# NON_RETRYABLE is matched by Temporal against type(exc).__name__, so an entry
+# naming a class nothing raises is dead weight that fails silently. It used to
+# list "PermanentFetchError", which existed nowhere, so terminal fetch failures
+# retried six times over ten minutes.
+# --------------------------------------------------------------------------
+def test_every_non_retryable_name_is_a_real_exception_class():
+    """A name that matches nothing is indistinguishable from an empty list."""
+    import importlib
+    import pkgutil
+
+    import pydantic
+
+    import directory_pipeline
+    from directory_pipeline.orchestration.shared import NON_RETRYABLE
+
+    found: set[str] = {pydantic.ValidationError.__name__}
+    for mod in pkgutil.walk_packages(directory_pipeline.__path__, "directory_pipeline."):
+        try:
+            module = importlib.import_module(mod.name)
+        except Exception:  # pragma: no cover - optional deps
+            continue
+        found.update(
+            name
+            for name in dir(module)
+            if isinstance(getattr(module, name), type)
+            and issubclass(getattr(module, name), BaseException)
+        )
+
+    unmatched = [name for name in NON_RETRYABLE if name not in found]
+    assert not unmatched, (
+        f"NON_RETRYABLE names no such exception class: {unmatched}. "
+        "Temporal matches on type(exc).__name__, so these entries do nothing."
+    )
+
+
+def test_a_terminal_fetch_failure_is_marked_non_retryable():
+    """The client already decided a retry cannot help; Temporal must honour it."""
+    from temporalio.exceptions import ApplicationError
+
+    from directory_pipeline.orchestration.activities import _classified
+    from directory_pipeline.scraping.client import FetchError
+
+    err = _classified(FetchError("404 Not Found", status=404, retryable=False))
+    assert isinstance(err, ApplicationError)
+    assert err.non_retryable is True
+    assert err.type == "FetchError"
+
+
+def test_a_transient_fetch_failure_stays_retryable():
+    from directory_pipeline.orchestration.activities import _classified
+    from directory_pipeline.scraping.client import FetchError
+
+    err = _classified(FetchError("503 Service Unavailable", status=503, retryable=True))
+    assert err.non_retryable is False
+
+
+async def test_a_fetch_error_mid_stream_is_classified(settings):
+    """The page stream can fail part-way, after yielding good pages."""
+    from temporalio.exceptions import ApplicationError
+
+    from directory_pipeline.orchestration.activities import _reraise_fetch_errors
+    from directory_pipeline.scraping.client import FetchError
+
+    async def pages():
+        yield "first-page"
+        raise FetchError("410 Gone", status=410, retryable=False)
+
+    seen = []
+    with pytest.raises(ApplicationError) as caught:
+        async for page in _reraise_fetch_errors(pages()):
+            seen.append(page)
+
+    assert seen == ["first-page"]  # work before the failure is not discarded
+    assert caught.value.non_retryable is True
