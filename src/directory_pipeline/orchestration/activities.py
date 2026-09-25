@@ -52,6 +52,30 @@ async def _reraise_fetch_errors(pages: Any) -> Any:
         raise _classified(exc) from exc
 
 
+def _resume_from_heartbeat() -> dict[str, Any] | None:
+    """Recover the copy a previous attempt had already started, if any.
+
+    Temporal hands a retried activity the details from its predecessor's last
+    heartbeat. For a reindex that is the difference between continuing a copy
+    already running on the cluster and launching a second one beside it.
+
+    Both the task and the target index are required: reattaching to a task that
+    is filling index A while this attempt swaps index B would publish an empty
+    index. Absent either, the attempt starts cleanly.
+    """
+    try:
+        details = activity.info().heartbeat_details
+    except RuntimeError:  # not inside an activity (unit tests, direct calls)
+        return None
+    if not details or not isinstance(details[0], dict):
+        return None
+    last = details[0]
+    task_id, target = last.get("task_id"), last.get("target_index")
+    if not (task_id and target):
+        return None
+    return {"task_id": task_id, "target_index": target}
+
+
 def _classified(exc: FetchError) -> ApplicationError:
     """Hand Temporal the client's own verdict on whether a retry can help.
 
@@ -215,12 +239,16 @@ class PipelineActivities:
 
     @activity.defn(name="reindex_alias")
     async def reindex_alias(self, request: ReindexRequest) -> ReindexResult:
+        resume = _resume_from_heartbeat()
+        if resume:
+            log.info("activity.reindex_resumed", **resume)
         activity.heartbeat({"stage": "reindex", "alias": request.alias})
         try:
             result = await self.index.reindex(
                 alias=request.alias,
                 wait_for_completion=request.wait_for_completion,
                 drop_old_index=request.drop_old_index,
+                resume=resume,
                 # Each poll heartbeats with live copy progress, so a reindex
                 # that outlives the heartbeat timeout is rescheduled rather
                 # than silently declared dead.
