@@ -240,6 +240,31 @@ class TextFallbackExtractor:
     STREET_RE = re.compile(
         r"(\d{1,6}\s+[A-Za-z0-9.'\- ]{3,60}?)(?=,\s*[A-Z][A-Za-z.'\- ]{1,40},\s*[A-Z]{2}\b)"
     )
+
+    # Directory prose writes states both ways: "Austin, TX" and "Portland,
+    # Oregon". The spelled-out form gets its own pattern, tried only after the
+    # postal-code form finds nothing, because a name is ambiguous in a way a
+    # code is not: "1 Rockefeller Plaza, New York, NY" contains the state name
+    # "New York" one comma too early, and a single combined pattern matches the
+    # street as the city. Preferring the unambiguous form keeps that from
+    # happening wherever a code is present.
+    #
+    # The alternation is built from the table normalize_region() reads, so the
+    # pattern and the normalizer cannot disagree about what a state is.
+    # Longest-first, or "Virginia" would shadow "West Virginia".
+    _STATE_NAME = (
+        "(?i:"
+        + "|".join(re.escape(name) for name in sorted(nz._US_STATES, key=len, reverse=True))
+        + r")\b"
+    )
+
+    CITY_STATE_NAME_RE = re.compile(
+        r"([A-Z][A-Za-z.'\- ]{1,40}?),\s*(" + _STATE_NAME + r")(?:\s+(\d{5})(?:-\d{4})?)?"
+    )
+    STREET_NAME_RE = re.compile(
+        r"(\d{1,6}\s+[A-Za-z0-9.'\- ]{3,60}?)"
+        r"(?=,\s*[A-Z][A-Za-z.'\- ]{1,40},\s*" + _STATE_NAME + r")"
+    )
     EMPLOYEES_RE = re.compile(
         r"(?:around|about|approximately|~)?\s*([\d,]+\s*(?:k\b)?(?:\s*[-\u2013]\s*[\d,]+)?)\s*"
         r"(?:employees|staff|people|headcount)",
@@ -325,13 +350,15 @@ class TextFallbackExtractor:
         if phone := self.PHONE_RE.search(text):
             out["phone"] = phone.group(0)
 
-        if location := self.CITY_STATE_RE.search(text):
+        location = self.CITY_STATE_RE.search(text) or self.CITY_STATE_NAME_RE.search(text)
+        if location:
             out["city"] = location.group(1).strip()
             out["region"] = location.group(2)
             if location.group(3):
                 out["postal_code"] = location.group(3)
 
-        if street := self.STREET_RE.search(text):
+        street = self.STREET_RE.search(text) or self.STREET_NAME_RE.search(text)
+        if street:
             out["address_line1"] = street.group(1).strip()
 
         if employees := self.EMPLOYEES_RE.search(text):

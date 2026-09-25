@@ -118,6 +118,56 @@ def test_text_layer_skips_the_directorys_own_host_and_social_links():
     assert TextFallbackExtractor().extract(listing)["website"] == "realcompany.io"
 
 
+def test_text_layer_reads_a_spelled_out_state():
+    """Directory prose writes "Portland, Oregon" as often as "Portland, OR"."""
+    html = (
+        "<html><body><div><p>Based at 900 SW Fifth Avenue, Portland, "
+        "Oregon 97204. Reach us on 503-555-0110.</p></div></body></html>"
+    )
+    listing = RawListing(
+        source="test", source_id="x", url="http://directory.test/company/x", html=html
+    )
+    found = TextFallbackExtractor().extract(listing)
+
+    assert found["city"] == "Portland"
+    assert found["region"] == "Oregon"  # normalize_region maps this to OR
+    assert found["postal_code"] == "97204"
+    assert found["address_line1"] == "900 SW Fifth Avenue"
+
+
+def test_a_state_name_inside_an_address_does_not_become_the_city():
+    """ "1 Rockefeller Plaza, New York, NY" holds the state name a comma early.
+
+    A single pattern accepting both a code and a spelled-out name matches
+    "Rockefeller Plaza, New York" first and emits the street as the city. The
+    postal-code form is tried first precisely so that cannot happen.
+    """
+    html = (
+        "<html><body><div><p>Based at 1 Rockefeller Plaza, New York, NY 10020. "
+        "Reach us on 212-555-0133.</p></div></body></html>"
+    )
+    listing = RawListing(
+        source="test", source_id="x", url="http://directory.test/company/x", html=html
+    )
+    found = TextFallbackExtractor().extract(listing)
+
+    assert found["city"] == "New York"
+    assert found["region"] == "NY"
+    assert found["postal_code"] == "10020"
+
+
+def test_state_alternation_prefers_the_longer_name():
+    """ "Virginia" must not shadow "West Virginia"."""
+    html = (
+        "<html><body><div><p>Based at 12 Main Street, Charleston, "
+        "West Virginia 25301.</p></div></body></html>"
+    )
+    listing = RawListing(
+        source="test", source_id="x", url="http://directory.test/company/x", html=html
+    )
+    assert TextFallbackExtractor().extract(listing)["region"] == "West Virginia"
+
+
 def test_text_layer_recovers_a_description_from_prose():
     """Drifted templates carry no meta description and no .company-description."""
     listing = listing_for("cascade-freight", _drifted_page)
