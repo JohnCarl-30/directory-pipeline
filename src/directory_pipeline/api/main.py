@@ -17,7 +17,8 @@ from typing import Annotated, Any
 from fastapi import Depends, FastAPI
 from fastapi.responses import FileResponse, JSONResponse
 
-from ..observability import METRICS
+from ..config import get_settings
+from ..observability import METRICS, summarize
 from .deps import Resources, get_resources, lifespan
 from .routes_ingest import router as ingest_router
 from .routes_search import router as search_router
@@ -68,6 +69,18 @@ async def metrics() -> dict[str, Any]:
     same and the call sites do not change.
     """
     return METRICS.snapshot()
+
+
+@app.get("/metrics/summary", tags=["ops"])
+async def metrics_summary() -> dict[str, Any]:
+    """The same counters, with the arithmetic already done.
+
+    /metrics answers "how many". This answers the questions someone actually
+    asks of a running pipeline: how fast is it going, how often did it need the
+    model, is prompt caching still working, and what is it costing. Cost appears
+    only once token rates are configured.
+    """
+    return summarize(METRICS.snapshot(), cost_per_mtok=get_settings().llm_cost_rates)
 
 
 @app.get("/ui", tags=["ops"], include_in_schema=False)
