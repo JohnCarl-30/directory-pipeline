@@ -36,11 +36,40 @@ from ..extraction.agent import ExtractionError, Extractor
 from ..observability import configure_logging, get_logger
 from ..resolution.adjudicator import Adjudicator
 from ..resolution.entity import Candidate, resolve
-from ..scraping.client import ResilientClient
+from ..scraping.client import FetchError, ResilientClient
 from ..scraping.crawler import DirectoryCrawler
 from ..search.index import SearchIndex
 
 log = get_logger(__name__)
+
+
+async def _reraise_fetch_errors(pages: Any) -> Any:
+    """Classify a FetchError raised part-way through the page stream."""
+    try:
+        async for page in pages:
+            yield page
+    except FetchError as exc:
+        raise _classified(exc) from exc
+
+
+def _classified(exc: FetchError) -> ApplicationError:
+    """Hand Temporal the client's own verdict on whether a retry can help.
+
+    The scraping client already classifies failures -- RETRYABLE_STATUS, then its
+    own backoff loop -- and only raises once it has either exhausted those
+    attempts or seen something terminal. Letting a bare FetchError escape throws
+    that away: the retry policy sees an unrecognised class name and retries a 404
+    six times over ten minutes.
+
+    Keying on exc.retryable rather than on a class name in NON_RETRYABLE also
+    means the decision cannot silently rot. A name in that list stops matching
+    the moment a class is renamed, with no error anywhere.
+    """
+    return ApplicationError(
+        str(exc),
+        type=type(exc).__name__,
+        non_retryable=not getattr(exc, "retryable", False),
+    )
 
 
 class PipelineActivities:
@@ -71,7 +100,10 @@ class PipelineActivities:
     @activity.defn(name="discover_listings")
     async def discover_listings(self, category: str, max_pages: int) -> list[str]:
         activity.heartbeat({"stage": "discover", "category": category})
-        urls = await self.crawler.discover(category, max_pages)
+        try:
+            urls = await self.crawler.discover(category, max_pages)
+        except FetchError as exc:
+            raise _classified(exc) from exc
         log.info("activity.discovered", category=category, urls=len(urls))
         return urls
 
@@ -90,9 +122,8 @@ class PipelineActivities:
         records: list[CompanyRecord] = []
         processed = 0
 
-        async for listing in self.crawler.fetch_details(
-            urls, source, seen_hashes=seen_hashes or {}
-        ):
+        pages = self.crawler.fetch_details(urls, source, seen_hashes=seen_hashes or {})
+        async for listing in _reraise_fetch_errors(pages):
             processed += 1
             try:
                 records.append(await self.extractor.extract(listing))
@@ -111,7 +142,10 @@ class PipelineActivities:
 
     @activity.defn(name="fetch_one")
     async def fetch_one(self, url: str, source: str) -> RawListing:
-        return await self.crawler.fetch_detail(url, source)
+        try:
+            return await self.crawler.fetch_detail(url, source)
+        except FetchError as exc:
+            raise _classified(exc) from exc
 
     # --- enrichment --------------------------------------------------------
 

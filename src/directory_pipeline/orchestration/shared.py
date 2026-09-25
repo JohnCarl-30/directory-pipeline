@@ -25,10 +25,18 @@ TASK_QUEUE = "directory-pipeline"
 
 # Errors where retrying cannot help. Naming them stops Temporal from burning a
 # full retry budget on a 404 or a schema violation.
+# Matched by Temporal against type(exc).__name__, so every entry must name a
+# class that something actually raises -- a stale name fails silently rather
+# than loudly. tests/test_workflows.py pins that.
+#
+# Fetch failures are deliberately absent: the scraping client already knows
+# whether a retry can help, and the activities forward that verdict as
+# ApplicationError(non_retryable=...). A name here could not express it, which
+# is why the "PermanentFetchError" that used to sit in this list matched nothing
+# and let terminal 404s retry six times.
 NON_RETRYABLE = [
     "ExtractionError",
     "ValidationError",
-    "PermanentFetchError",
 ]
 
 # Scraping: cheap per attempt, frequently transient (429s, blips, proxy churn).
