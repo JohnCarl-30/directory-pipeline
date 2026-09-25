@@ -338,13 +338,24 @@ class SearchIndex:
         *,
         on_progress: Callable[[dict[str, Any]], None] | None = None,
         poll_interval_s: float = 2.0,
+        resume_task_id: str | None = None,
+        progress_extra: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Submit the copy as a task and poll it to completion."""
-        submitted = await self.client.reindex(body=body, wait_for_completion=False)
-        task_id = submitted.get("task")
-        if not task_id:
-            raise RuntimeError("reindex did not return a task id")
-        log.info("reindex.task_submitted", task_id=task_id)
+        """Submit the copy as a task and poll it to completion.
+
+        `resume_task_id` reattaches to a copy already running on the cluster
+        instead of submitting another one, which is what makes a retry of this
+        safe: the task outlives the process that submitted it.
+        """
+        if resume_task_id:
+            task_id: str | None = resume_task_id
+            log.info("reindex.task_resumed", task_id=task_id)
+        else:
+            submitted = await self.client.reindex(body=body, wait_for_completion=False)
+            task_id = submitted.get("task")
+            if not task_id:
+                raise RuntimeError("reindex did not return a task id")
+            log.info("reindex.task_submitted", task_id=task_id)
 
         while True:
             status = await self.client.tasks.get(task_id=task_id)
@@ -354,7 +365,17 @@ class SearchIndex:
                 # Gives the caller somewhere to heartbeat from: a copy that
                 # outlives the activity heartbeat timeout would otherwise be
                 # declared dead and restarted from scratch.
-                on_progress(status.get("task", {}).get("status", {}))
+                # The task id rides along so the caller can record it and
+                # reattach after a restart rather than starting a second copy.
+                # Every report carries the task id and target index, because
+                # only the most recent heartbeat's details survive a restart.
+                on_progress(
+                    {
+                        **status.get("task", {}).get("status", {}),
+                        **(progress_extra or {}),
+                        "task_id": task_id,
+                    }
+                )
             await asyncio.sleep(poll_interval_s)
 
         if error := status.get("error"):
@@ -369,6 +390,8 @@ class SearchIndex:
         wait_for_completion: bool = False,
         drop_old_index: bool = False,
         on_progress: Callable[[dict[str, Any]], None] | None = None,
+        resume: dict[str, Any] | None = None,
+        poll_interval_s: float = 2.0,
     ) -> dict[str, Any]:
         """Zero-downtime reindex behind the alias.
 
@@ -397,7 +420,16 @@ class SearchIndex:
         started = time.perf_counter()
 
         source = await self.resolve_alias(alias)
-        target = physical_index_name(alias)
+
+        # A retry must not mint a new target: physical_index_name() is unique by
+        # construction (timestamp plus random suffix), so recomputing it would
+        # create a second index and submit a second copy while the first is
+        # still running -- two full copies against the cluster, and an orphan
+        # index nobody swaps to. Reusing the recorded target and task makes the
+        # retry continue the original copy instead.
+        resume_task_id = (resume or {}).get("task_id")
+        resume_target = (resume or {}).get("target_index")
+        target = resume_target or physical_index_name(alias)
 
         if target == source:
             # Unreachable with a unique suffix, but the failure mode this
@@ -406,7 +438,10 @@ class SearchIndex:
             raise RuntimeError(f"reindex source and target are the same index: {source}")
 
         await self.ensure_pipeline()
-        await self.create_index(target)
+        if resume_target:
+            log.info("reindex.resuming", target=target, task_id=resume_task_id)
+        else:
+            await self.create_index(target)
 
         copied = 0
         if source:
@@ -429,7 +464,13 @@ class SearchIndex:
             else:
                 # Submit-and-poll. Nothing holds a socket open, so this is the
                 # form that survives a multi-hour copy.
-                response = await self._reindex_via_task(body, on_progress=on_progress)
+                response = await self._reindex_via_task(
+                    body,
+                    on_progress=on_progress,
+                    resume_task_id=resume_task_id,
+                    progress_extra={"target_index": target},
+                    poll_interval_s=poll_interval_s,
+                )
             copied = int(response.get("created", 0)) + int(response.get("updated", 0))
             failures = response.get("failures") or []
             if failures:
