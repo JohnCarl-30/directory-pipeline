@@ -6,9 +6,8 @@ help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
 	  awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n",$$1,$$2}'
 
-install: ## Create the venv and install the package with dev extras
-	uv venv --python 3.12 $(VENV)
-	uv pip install --python $(PY) -e ".[dev]"
+install: ## Create the venv from uv.lock (same resolution as CI)
+	uv sync --frozen --all-extras
 
 demo: ## Run the full pipeline locally (no Docker, no credentials)
 	$(PY) scripts/run_local.py
