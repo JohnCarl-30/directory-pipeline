@@ -84,6 +84,13 @@ async def run_worker() -> None:
         # Graceful drain: stop accepting new tasks, let in-flight ones finish.
         loop.add_signal_handler(sig, stop.set)
 
+    if settings.worker_metrics_port:
+        # Without this the worker's counters are unreachable: it has no HTTP
+        # server of its own, and the pipeline's work all happens here.
+        from ..metrics_prometheus import serve as serve_metrics
+
+        serve_metrics(settings.worker_metrics_port)
+
     log.info(
         "worker.starting",
         task_queue=settings.temporal_task_queue,

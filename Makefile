@@ -29,6 +29,11 @@ up: ## Start the full stack (OpenSearch + Temporal + workers + API)
 	@echo "OpenSearch Dash   http://localhost:5601"
 	@echo "API docs          http://localhost:8000/docs"
 
+observe: ## Start Prometheus and scrape the API + every worker replica
+	docker compose --profile observability up -d prometheus
+	@echo "Prometheus        http://localhost:9090"
+	@echo "worker targets    http://localhost:9090/targets"
+
 down: ## Stop the stack
 	docker compose down
 

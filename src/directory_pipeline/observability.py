@@ -15,6 +15,7 @@ import logging
 import sys
 import threading
 import time
+from bisect import bisect_right
 from collections import defaultdict
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -55,10 +56,35 @@ clear = structlog.contextvars.clear_contextvars
 class _Metrics:
     """Counters + latency histograms, aggregated in memory."""
 
+    # Percentiles computed per process cannot be aggregated: averaging two
+    # workers' p95 is not the fleet's p95. Buckets can be summed, so the
+    # Prometheus exporter reads these while the JSON endpoint keeps the
+    # percentiles, which are the more readable form for one process.
+    LATENCY_BUCKETS = (
+        0.005,
+        0.01,
+        0.025,
+        0.05,
+        0.1,
+        0.25,
+        0.5,
+        1.0,
+        2.5,
+        5.0,
+        10.0,
+        30.0,
+        60.0,
+    )
+
     def __init__(self) -> None:
         self._lock = threading.Lock()
         self._counters: dict[tuple[str, tuple[tuple[str, str], ...]], float] = defaultdict(float)
         self._timings: dict[str, list[float]] = defaultdict(list)
+        self._buckets: dict[str, list[int]] = defaultdict(
+            lambda: [0] * (len(self.LATENCY_BUCKETS) + 1)
+        )
+        self._sums: dict[str, float] = defaultdict(float)
+        self._counts: dict[str, int] = defaultdict(int)
 
     def incr(self, name: str, value: float = 1.0, **labels: str) -> None:
         key = (name, tuple(sorted(labels.items())))
@@ -71,6 +97,13 @@ class _Metrics:
             series.append(seconds)
             if len(series) > 5000:  # bound memory on long-lived workers
                 del series[:-5000]
+            # Buckets and totals are never trimmed: they are counters, and a
+            # counter that goes backwards makes every rate() over it wrong.
+            self._sums[name] += seconds
+            self._counts[name] += 1
+            edges = self.LATENCY_BUCKETS
+            idx = bisect_right(edges, seconds)
+            self._buckets[name][idx] += 1
 
     def snapshot(self) -> dict[str, Any]:
         with self._lock:
@@ -91,6 +124,28 @@ class _Metrics:
                     "max": ordered[-1],
                 }
         return {"counters": counters, "timings": timings}
+
+    def histograms(self) -> dict[str, dict[str, Any]]:
+        """Cumulative buckets, in the shape Prometheus wants.
+
+        Kept separate from snapshot() so the JSON endpoint's contract does not
+        change: the two views answer different questions for different readers.
+        """
+        with self._lock:
+            out = {}
+            for name, counts in self._buckets.items():
+                running = 0
+                cumulative: list[tuple[str, int]] = []
+                for edge, count in zip(self.LATENCY_BUCKETS, counts, strict=False):
+                    running += count
+                    cumulative.append((str(edge), running))
+                cumulative.append(("+Inf", self._counts[name]))
+                out[name] = {
+                    "buckets": cumulative,
+                    "sum": self._sums[name],
+                    "count": self._counts[name],
+                }
+            return out
 
 
 def _pct(ordered: list[float], q: float) -> float:

@@ -14,10 +14,11 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Annotated, Any
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, Response
 from fastapi.responses import FileResponse, JSONResponse
 
 from ..config import get_settings
+from ..metrics_prometheus import render
 from ..observability import METRICS, summarize
 from .deps import Resources, get_resources, lifespan
 from .routes_ingest import router as ingest_router
@@ -81,6 +82,19 @@ async def metrics_summary() -> dict[str, Any]:
     only once token rates are configured.
     """
     return summarize(METRICS.snapshot(), cost_per_mtok=get_settings().llm_cost_rates)
+
+
+@app.get("/metrics/prometheus", tags=["ops"], include_in_schema=False)
+async def metrics_prometheus() -> Response:
+    """Exposition format for a Prometheus scrape.
+
+    This is the answer to the caveat on /metrics/summary. Prometheus scrapes
+    each process and aggregates at query time, so no shared counter store is
+    needed -- but every process has to be scrapeable, and the workers serve
+    their own port for exactly that reason.
+    """
+    body, content_type = render()
+    return Response(content=body, media_type=content_type)
 
 
 @app.get("/ui", tags=["ops"], include_in_schema=False)

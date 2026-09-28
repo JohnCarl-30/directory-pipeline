@@ -1,0 +1,27 @@
+# Scrape config for the local stack.
+#
+# The workers are the reason this file exists. They run the pipeline but have no
+# published port -- the service scales, so a fixed host port would collide on the
+# second replica. Prometheus sits inside the compose network instead and resolves
+# the service name, which Docker answers with one A record per running replica.
+# Scaling the workers up therefore adds scrape targets with no config change.
+global:
+  scrape_interval: 15s
+  scrape_timeout: 10s
+
+scrape_configs:
+  - job_name: workers
+    dns_sd_configs:
+      - names: [worker]
+        type: A
+        port: 9100
+    relabel_configs:
+      # Keep the replica's address as the instance label so a single misbehaving
+      # worker is distinguishable from the fleet.
+      - source_labels: [__address__]
+        target_label: instance
+
+  - job_name: api
+    metrics_path: /metrics/prometheus
+    static_configs:
+      - targets: [api:8000]

@@ -88,9 +88,19 @@ services:
       - ENRICHMENT_BASE_URL=http://mock-enrichment:8082
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - EXTRACTION_MODEL=${EXTRACTION_MODEL:-claude-opus-5}
+      - WORKER_METRICS_PORT=9100
+    # Not published: this service scales, so a fixed host port would collide on
+    # the second replica. Prometheus scrapes it inside the network instead.
+    expose:
+      - "9100"
     depends_on:
       opensearch: { condition: service_healthy }
       temporal: { condition: service_started }
+      # The worker fetches from both fixtures. Without these, `up -d worker`
+      # starts a worker whose every fetch fails and whose circuit breaker then
+      # trips -- which looks like a bug in the crawler.
+      mock-directory: { condition: service_healthy }
+      mock-enrichment: { condition: service_healthy }
     # In production this is the autoscaling target: scale on Temporal's
     # task-queue backlog, not on CPU, because scrapers are I/O bound and
     # sit near-idle while the queue is deep.
@@ -110,6 +120,23 @@ services:
     depends_on:
       opensearch: { condition: service_healthy }
       temporal: { condition: service_started }
+
+  prometheus:
+    # Behind a profile: the stack is already ten containers, and this one is only
+    # wanted when you are actually looking at metrics.
+    #   docker compose --profile observability up -d prometheus
+    image: prom/prometheus:v3.1.0
+    container_name: dp-prometheus
+    profiles: [observability]
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.retention.time=6h
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "9090:9090"
+    depends_on:
+      api: { condition: service_started }
 
 volumes:
   opensearch-data:

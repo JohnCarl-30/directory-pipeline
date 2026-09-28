@@ -275,7 +275,41 @@ The endpoint also reports what it cannot see. In-memory counters belong to the
 process answering the request, and the pipeline's work happens in workers — so an
 API-served summary shows zero throughput while the pipeline indexes normally. The
 response carries a `scope` block saying so, because unqualified "0 records/minute"
-reads as an outage. A shared collector is the real fix.
+reads as an outage.
+
+`/metrics/prometheus` is the answer to that, and the reason is worth stating:
+Prometheus scrapes each process and aggregates at query time, so there is no
+shared counter store to build. What it requires instead is that every process be
+scrapeable — which the workers were not, having no HTTP server of their own. They
+now serve `WORKER_METRICS_PORT` for exactly that reason.
+
+```bash
+make observe        # Prometheus at :9090, scraping the API and every replica
+```
+
+The workers are not port-published: the service scales, so a fixed host port
+would collide on the second replica. Prometheus sits inside the network and
+resolves the service name, which Docker answers with one A record per replica —
+so `docker compose up -d --scale worker=6` adds scrape targets with no config
+change.
+
+Latency is exported as **histogram buckets, not percentiles**. A per-process p95
+cannot be combined: averaging two workers' p95 is not the fleet's p95. Buckets
+sum, so `histogram_quantile(0.95, sum(rate(..._bucket[5m])) by (le))` is a real
+fleet figure. The JSON endpoint keeps percentiles, which are the more readable
+form when you are looking at one process.
+
+Measured on the local stack, with two replicas and 7 indexed documents:
+
+```
+3 scrape targets, 3 up            api + both worker replicas (DNS-discovered)
+crawl_index_pages_total           2 on one replica, 1 on the other
+sum(index_documents_total)        7   — matches the index exactly
+p95 crawl_index_page_seconds      0.034s   — from summed buckets
+```
+
+That split across replicas is the problem `/metrics/summary` could not solve,
+and the sum matching the index is the proof it now is.
 
 ---
 
@@ -400,9 +434,10 @@ nothing at all, which is why the integration job now exists:
   selectors. The method transfers; the percentages will not.
 - The enrichment cache is in-process. The interface (`get`/`set` with TTL) is
   the one you put Redis behind.
-- Metrics are in-process counters, so a summary served by the API cannot see
-  worker-side activity. A Prometheus exporter is the fix — same call sites,
-  different sink.
+- `/metrics` and `/metrics/summary` are per-process by nature, so a summary
+  served by the API cannot see worker-side activity. `/metrics/prometheus` is
+  the aggregatable view; the JSON endpoints remain the readable one for a single
+  process.
 - Single-shard index, suited to the demo's data volume rather than copied as a
   default.
 - Verified locally only: no cloud deployment, and nothing here has run against a

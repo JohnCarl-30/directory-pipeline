@@ -48,6 +48,11 @@ class Settings(BaseSettings):
     extraction_model: str = "claude-opus-5"
     extraction_mode: str = "auto"  # auto | llm | dom
 
+    # Worker metrics. The workers do the pipeline's work but have no HTTP
+    # server, so an exporter served only by the API reports a busy pipeline as
+    # idle. 0 disables the listener.
+    worker_metrics_port: int = 9100
+
     # Cost estimation, in USD per million tokens. Unset on purpose: token
     # prices change, and /metrics/summary reporting a stale hardcoded rate as
     # fact would be worse than reporting nothing. Fill these from current
