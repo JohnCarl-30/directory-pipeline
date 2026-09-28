@@ -18,7 +18,7 @@ import pytest
 
 from directory_pipeline.config import Settings
 from directory_pipeline.domain.models import Address, CompanyRecord, Contact, RawListing
-from directory_pipeline.extraction.agent import LLMExtractor
+from directory_pipeline.extraction.cascade import LLMExtractor
 from directory_pipeline.extraction.normalize import normalize_company_name
 from directory_pipeline.observability import METRICS
 from directory_pipeline.resolution.adjudicator import Adjudicator
@@ -196,7 +196,7 @@ async def test_page_content_stays_out_of_the_cached_prefix(llm_settings):
 
 @pytest.mark.asyncio
 async def test_oversized_pages_are_truncated_before_sending(llm_settings):
-    from directory_pipeline.extraction.agent import _MAX_HTML_CHARS
+    from directory_pipeline.extraction.cascade import _MAX_HTML_CHARS
 
     extractor = LLMExtractor(llm_settings)
     extractor._client = FakeClient(FakeResponse(content=[FakeTextBlock("{}")]))

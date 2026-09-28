@@ -1,8 +1,13 @@
 # Directory Pipeline
 
-An agentic **crawl → extract → enrich → resolve → search** pipeline: durable
-Temporal workflows over a Python/FastAPI service, writing into an alias-fronted
-OpenSearch index.
+A **crawl → extract → enrich → resolve → search** pipeline: durable Temporal
+workflows over a Python/FastAPI service, writing into an alias-fronted OpenSearch
+index.
+
+The model is used in two places and in both it is a **single structured call**,
+not an agent: no loop, no conversation history, no tool result fed back. Calling
+that "agentic" would be overclaiming, and the interesting part is why — an agent
+*was* built for extraction and measured before this shape was settled on.
 
 Two things it deliberately does not do — an agentic extractor, and Pydantic AI —
 were evaluated rather than assumed, and the reasoning is in
@@ -25,7 +30,7 @@ which is exactly the layer Temporal owns.
 
 | Concern | Where | The decision worth reading |
 |---|---|---|
-| Agentic extraction | `extraction/agent.py` | Three layers, cheapest first — selectors, then regex over prose, then the model. Structured outputs make the model's response schema-valid by construction; confidence is capped by the weakest source used. |
+| Model-assisted extraction | `extraction/cascade.py` | Three layers, cheapest first — selectors, then regex over prose, then the model. Structured outputs make the model's response schema-valid by construction; confidence is capped by the weakest source used. |
 | Tool calling | `resolution/adjudicator.py` | A strict tool schema to adjudicate *only* borderline duplicate pairs, so model cost tracks genuine ambiguity rather than corpus size. |
 | Index design | `search/index.py` | `dynamic: strict` mappings, three analyzers for company names, alias-swap reindex. |
 | Zero-downtime reindex | `search/index.py::reindex` | Build new → copy → refresh → **atomic** alias swap → keep the old index as the rollback path. |
@@ -97,7 +102,7 @@ make down
 | Temporal UI | http://localhost:8080 |
 | OpenSearch Dashboards | http://localhost:5601 |
 
-### Enabling the agentic paths
+### Enabling the model-backed paths
 
 Both model-backed paths are **off** unless a key is present, and the pipeline is
 fully functional without one:

@@ -1,4 +1,4 @@
-"""Extraction: deterministic DOM first, agentic LLM only where it pays.
+"""Extraction: deterministic DOM first, a model call only where it pays.
 
 The design point is cost, not capability. A directory page is 95% boilerplate;
 CSS selectors extract it for free and never hallucinate. The LLM earns its cost

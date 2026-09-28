@@ -29,7 +29,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from directory_pipeline.domain.models import RawListing  # noqa: E402
-from directory_pipeline.extraction.agent import (  # noqa: E402
+from directory_pipeline.extraction.cascade import (  # noqa: E402
     DomExtractor,
     TextFallbackExtractor,
 )

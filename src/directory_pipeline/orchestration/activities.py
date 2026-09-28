@@ -32,7 +32,7 @@ from ..domain.models import (
     ReindexResult,
 )
 from ..enrichment.provider import EnrichmentProvider
-from ..extraction.agent import ExtractionError, Extractor
+from ..extraction.cascade import ExtractionError, Extractor
 from ..observability import configure_logging, get_logger
 from ..resolution.adjudicator import Adjudicator
 from ..resolution.entity import Candidate, resolve

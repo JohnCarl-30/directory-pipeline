@@ -79,7 +79,7 @@ then choosing the next action is the actual work, and a loop earns its cost.
 ## 2. Pydantic AI is not used
 
 **Decision:** model calls go directly through the Anthropic SDK
-(`AsyncAnthropic`, `messages.create`) in `extraction/agent.py` and
+(`AsyncAnthropic`, `messages.create`) in `extraction/cascade.py` and
 `resolution/adjudicator.py`.
 
 Pydantic and `pydantic-settings` are used heavily — for domain models, API

@@ -32,7 +32,7 @@ import uvicorn  # noqa: E402
 from directory_pipeline.config import Settings  # noqa: E402
 from directory_pipeline.domain.models import EnrichedCompany  # noqa: E402
 from directory_pipeline.enrichment.provider import EnrichmentProvider  # noqa: E402
-from directory_pipeline.extraction.agent import ExtractionError, Extractor  # noqa: E402
+from directory_pipeline.extraction.cascade import ExtractionError, Extractor  # noqa: E402
 from directory_pipeline.fixtures.mock_directory import app as directory_app  # noqa: E402
 from directory_pipeline.fixtures.mock_enrichment import app as enrichment_app  # noqa: E402
 from directory_pipeline.observability import METRICS, configure_logging  # noqa: E402

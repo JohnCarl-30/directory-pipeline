@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from directory_pipeline.domain.models import ExtractionMethod, RawListing
-from directory_pipeline.extraction.agent import (
+from directory_pipeline.extraction.cascade import (
     DomExtractor,
     ExtractionError,
     Extractor,
