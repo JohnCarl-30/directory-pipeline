@@ -40,6 +40,7 @@ which is exactly the layer Temporal owns.
 | Entity resolution | `resolution/entity.py` | Multi-key blocking, weighted probabilistic scoring, union-find clustering. |
 | Data QA | `reporting/qa.py` | Pandas coverage/validity gates that block a release, not just decorate it. |
 | Measured relevance | `api/static/index.html` | A search console that renders the facet aggregations the engine ranked with, and the BM25 scoring tree behind any hit — so relevance is inspectable rather than argued about. |
+| MCP integration | `mcp/server.py` | The directory exposed as MCP tools, reusing `SearchClient` so ranking cannot drift from `/search`. Results trimmed by default, because a tool result is spent from the client's context. |
 | Extraction accuracy | `scripts/eval_extraction.py` | Per-layer, per-field precision and recall against the fixtures the pages are rendered from. The cascade is a measurement, not a claim. |
 
 ---
@@ -78,7 +79,7 @@ grow past the limit on a large run.
 ```bash
 make install     # uv sync from uv.lock -- exact pinned versions
 make demo        # full pipeline against in-process mocks
-make test        # 182 tests (~9s; the OpenSearch ones skip without a cluster)
+make test        # 198 tests (~11s; 10 skip themselves without a cluster)
 
 python scripts/eval_extraction.py    # extraction accuracy, per layer and field
 ```
@@ -101,6 +102,7 @@ make down
 | API docs | http://localhost:8000/docs |
 | Temporal UI | http://localhost:8080 |
 | OpenSearch Dashboards | http://localhost:5601 |
+| Prometheus (`make observe`) | http://localhost:9090 |
 
 ### Enabling the model-backed paths
 
@@ -194,6 +196,50 @@ the scoring tree, which makes the BM25 boosts visible instead of a bare score.
 Ticking *include duplicates* reveals the records entity resolution folded away —
 the Cascade Freight pair is the interesting case, since they look near-identical
 and are correctly kept apart.
+
+### MCP: exposing the directory, not consuming tools
+
+`dp-mcp` serves the finished index over MCP, so the directory is queryable from
+any MCP client — Claude Desktop, Claude Code, anything else that speaks the
+protocol.
+
+The direction matters. MCP exists to hand tools and data to a model, and this
+pipeline has no agent loop to hand tools *to* (see
+[`docs/decisions.md`](docs/decisions.md)). What it does have is a ranked,
+deduplicated dataset and the relevance work already done, which is exactly what
+is worth exposing.
+
+| tool | what it does |
+|---|---|
+| `search_companies` | free text plus structured filters; returns ranked results and the facet counts computed over the whole matching set |
+| `get_company` | one full record by `record_id` |
+| `explain_ranking` | the BM25 breakdown for a company against a query |
+| `index_status` | reachability, which physical index the alias points at, document count |
+
+Every tool delegates to `SearchClient`, so the ranking, filters and aggregations
+are the same ones `/search` serves. A second query implementation would drift
+from the first, and the drift would surface as "MCP gives different answers".
+
+Two things this got right that are easy to get wrong:
+
+- **Results are trimmed by default.** A tool result is spent from the client's
+  context window, and a raw OpenSearch hit carries the whole source document,
+  highlight fragments and index metadata — tens of kilobytes per page, mostly
+  unread. The default shape is ~8 fields; `detail="full"` returns everything.
+- **stdout is the protocol.** Under stdio transport a stray `print`, or a logger
+  defaulting to stdout, corrupts the stream and every client fails with a parse
+  error pointing nowhere near the cause. A test launches the real entry point as
+  a subprocess and asserts every stdout line parses as JSON-RPC.
+
+```bash
+# Claude Code
+claude mcp add directory-pipeline -- /abs/path/to/.venv/bin/dp-mcp
+
+# or over HTTP instead of stdio
+MCP_TRANSPORT=streamable-http .venv/bin/dp-mcp
+```
+
+It needs OpenSearch reachable (`make up`), and nothing else — no API key.
 
 ### Entity resolution: blocking, then weighted scoring
 
@@ -333,13 +379,15 @@ src/directory_pipeline/
 ├── orchestration/        activities · workflows · worker · retry policies
 ├── reporting/qa.py       pandas coverage/validity gates
 ├── api/                  FastAPI: search, ingest, ops
+├── mcp/                  MCP server over the finished index
 └── fixtures/             mock directory + mock enrichment API
 ```
 
 ## Testing
 
-182 tests. 173 need neither network nor Docker; the remaining 9 are OpenSearch
-integration tests that **skip themselves** when no cluster is reachable.
+198 tests. 188 need neither network nor Docker; the remaining 10 **skip
+themselves** when no cluster is reachable — nine OpenSearch integration tests
+and one that launches the MCP server as a subprocess.
 
 The model-calling paths are covered without an API key. Both classes resolve
 their client lazily into `self._client`, so a fake assigned there is all the

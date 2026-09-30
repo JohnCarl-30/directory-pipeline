@@ -18,6 +18,7 @@ dependencies = [
     "python-dotenv>=1.0",
     "anthropic>=0.69,<2",
     "prometheus-client>=0.21",
+    "mcp>=1.2",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +31,7 @@ dev = [
 ]
 
 [project.scripts]
+dp-mcp = "directory_pipeline.mcp.server:main"
 dp-worker = "directory_pipeline.orchestration.worker:main"
 dp-api = "directory_pipeline.api.main:run"
 
