@@ -121,10 +121,6 @@ class FakeActivities:
             duration_s=0.1,
         )
 
-    @activity.defn(name="index_stats")
-    async def index_stats(self, alias: str) -> dict:
-        return {"alias": alias, "index": f"{alias}-v3-test", "documents": len(self.indexed)}
-
     def all(self) -> list:
         return [
             self.discover_listings,
@@ -134,7 +130,6 @@ class FakeActivities:
             self.bootstrap_index,
             self.index_documents,
             self.reindex_alias,
-            self.index_stats,
         ]
 
 

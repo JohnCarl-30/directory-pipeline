@@ -27,7 +27,6 @@ from ..config import Settings, get_settings
 from ..domain.models import (
     CompanyRecord,
     EnrichedCompany,
-    RawListing,
     ReindexRequest,
     ReindexResult,
 )
@@ -164,13 +163,6 @@ class PipelineActivities:
         log.info("activity.extracted", requested=len(urls), extracted=len(records))
         return records
 
-    @activity.defn(name="fetch_one")
-    async def fetch_one(self, url: str, source: str) -> RawListing:
-        try:
-            return await self.crawler.fetch_detail(url, source)
-        except FetchError as exc:
-            raise _classified(exc) from exc
-
     # --- enrichment --------------------------------------------------------
 
     @activity.defn(name="enrich_records")
@@ -259,7 +251,3 @@ class PipelineActivities:
         except Exception as exc:
             raise ApplicationError(f"reindex failed: {exc}", type="ReindexError") from exc
         return ReindexResult(**result)
-
-    @activity.defn(name="index_stats")
-    async def index_stats(self, alias: str) -> dict[str, Any]:
-        return await self.index.stats(alias)

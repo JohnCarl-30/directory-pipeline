@@ -63,13 +63,11 @@ async def run_worker() -> None:
         activities=[
             activities.discover_listings,
             activities.fetch_and_extract,
-            activities.fetch_one,
             activities.enrich_records,
             activities.resolve_duplicates,
             activities.bootstrap_index,
             activities.index_documents,
             activities.reindex_alias,
-            activities.index_stats,
         ],
         max_concurrent_activities=settings.crawl_concurrency * 4,
         max_concurrent_workflow_tasks=100,

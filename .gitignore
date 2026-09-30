@@ -10,3 +10,6 @@ build/
 data/
 reports/*.csv
 reports/*.parquet
+
+# macOS
+.DS_Store
