@@ -89,7 +89,12 @@
                 letter-spacing: .1em; color: var(--soft); font-weight: 600; }
   .field { margin-bottom: 9px; }
   .field label { display: block; font-size: 12px; color: var(--soft); margin-bottom: 3px; }
-  .opt { display: flex; align-items: center; gap: 7px; padding: 3px 0; font-size: 13px; cursor: pointer; }
+  /* label.opt, not .opt: `.field label` above is (0,1,1) and a bare `.opt` is
+     (0,1,0), so it won the display property and collapsed the count onto the
+     end of its label -- "Seattle2". Matching its specificity and sitting later
+     in the sheet puts the flex row back. */
+  label.opt { display: flex; align-items: center; gap: 7px; padding: 3px 0;
+              font-size: 13px; color: var(--ink); cursor: pointer; }
   .opt input { margin: 0; accent-color: var(--accent); }
   .opt .n { margin-left: auto; font: 11px var(--mono); color: var(--soft); }
   .opt.off { opacity: .45; }
