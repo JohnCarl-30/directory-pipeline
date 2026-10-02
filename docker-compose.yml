@@ -89,10 +89,12 @@ services:
       - ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}
       - EXTRACTION_MODEL=${EXTRACTION_MODEL:-claude-opus-5}
       - WORKER_METRICS_PORT=9100
+      - TEMPORAL_METRICS_PORT=9101
     # Not published: this service scales, so a fixed host port would collide on
     # the second replica. Prometheus scrapes it inside the network instead.
     expose:
-      - "9100"
+      - "9100"   # application counters
+      - "9101"   # Temporal SDK metrics
     depends_on:
       opensearch: { condition: service_healthy }
       temporal: { condition: service_started }
@@ -116,6 +118,7 @@ services:
       - OPENSEARCH_URL=http://opensearch:9200
       - DIRECTORY_BASE_URL=http://mock-directory:8081
       - ENRICHMENT_BASE_URL=http://mock-enrichment:8082
+      - TEMPORAL_METRICS_PORT=9101
     ports: ["8000:8000"]
     depends_on:
       opensearch: { condition: service_healthy }

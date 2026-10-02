@@ -48,6 +48,12 @@ class Settings(BaseSettings):
     extraction_model: str = "claude-opus-5"
     extraction_mode: str = "auto"  # auto | llm | dom
 
+    # Temporal SDK metrics: task-queue latency, activity failures, poller
+    # counts. Off unless a port is given, because enabling it binds one -- a
+    # local script that only wanted a client should not open a listener. The
+    # compose stack sets it for the worker and the API.
+    temporal_metrics_port: int = 0
+
     # Worker metrics. The workers do the pipeline's work but have no HTTP
     # server, so an exporter served only by the API reports a busy pipeline as
     # idle. 0 disables the listener.

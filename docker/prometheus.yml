@@ -21,7 +21,23 @@ scrape_configs:
       - source_labels: [__address__]
         target_label: instance
 
+  # The SDK publishes its own series on a separate port: task-queue latency,
+  # activity failures, poller counts. Schedule-to-start latency lives here, and
+  # it is the number this service would autoscale on.
+  - job_name: workers-temporal-sdk
+    dns_sd_configs:
+      - names: [worker]
+        type: A
+        port: 9101
+    relabel_configs:
+      - source_labels: [__address__]
+        target_label: instance
+
   - job_name: api
     metrics_path: /metrics/prometheus
     static_configs:
       - targets: [api:8000]
+
+  - job_name: api-temporal-sdk
+    static_configs:
+      - targets: [api:9101]

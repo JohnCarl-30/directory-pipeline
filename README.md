@@ -344,6 +344,33 @@ resolves the service name, which Docker answers with one A record per replica �
 so `docker compose up -d --scale worker=6` adds scrape targets with no config
 change.
 
+The SDK publishes its own series on a second port, and they answer what the
+application counters structurally cannot: not "how many pages did we fetch" but
+"how long did a task wait before any worker picked it up". That one —
+`temporal_workflow_task_schedule_to_start_latency_seconds` — is the signal this
+service would autoscale on, which the worker's compose comment has always
+claimed and nothing measured until now.
+
+```
+p95 task schedule-to-start      0.095s
+workflows completed                  6
+mean end-to-end                  0.629s
+
+mean activity latency, by activity_type
+  bootstrap_index                0.153s
+  index_documents                0.118s
+  enrich_records                 0.091s
+  discover_listings              0.085s
+  fetch_and_extract              0.019s
+  resolve_duplicates             0.004s
+```
+
+Those come free with a `Runtime`, but not with the SDK's default flags: it ships
+counters without `_total`, durations in milliseconds and no unit suffix, all of
+which predate Prometheus conventions. Left alone, a `rate()` over an SDK counter
+and a `rate()` over one of ours would disagree about what a unit is. The three
+flags that fix it are set in `connect()`.
+
 Latency is exported as **histogram buckets, not percentiles**. A per-process p95
 cannot be combined: averaging two workers' p95 is not the fleet's p95. Buckets
 sum, so `histogram_quantile(0.95, sum(rate(..._bucket[5m])) by (le))` is a real

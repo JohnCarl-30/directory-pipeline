@@ -20,6 +20,7 @@ from typing import Any
 
 from temporalio.client import Client
 from temporalio.contrib.pydantic import pydantic_data_converter
+from temporalio.runtime import PrometheusConfig, Runtime, TelemetryConfig
 from temporalio.worker import Worker
 
 from ..config import get_settings
@@ -35,6 +36,43 @@ from .workflows import (
 log = get_logger(__name__)
 
 
+_runtime: Runtime | None = None
+
+
+def _metrics_runtime(settings: Any) -> Runtime | None:
+    """A Runtime that publishes the SDK's own metrics, built at most once.
+
+    These are the numbers the application counters cannot see: how long a task
+    waits before a worker picks it up, how often an activity failed and was
+    retried, how many pollers are alive. Schedule-to-start latency is the signal
+    this service autoscales on -- queue depth, not CPU, because scrapers sit
+    near-idle while the queue is deep.
+
+    Cached because a Runtime binds a port; building a second one in the same
+    process fails on the bind rather than on anything informative.
+    """
+    global _runtime
+    if not settings.temporal_metrics_port:
+        return None
+    if _runtime is None:
+        _runtime = Runtime(
+            telemetry=TelemetryConfig(
+                metrics=PrometheusConfig(
+                    bind_address=f"0.0.0.0:{settings.temporal_metrics_port}",
+                    # The SDK defaults predate Prometheus conventions: no _total
+                    # on counters, no unit suffix, durations in milliseconds.
+                    # Left alone, rate() over a counter and any duration maths
+                    # silently disagree with every other metric in the stack.
+                    counters_total_suffix=True,
+                    unit_suffix=True,
+                    durations_as_seconds=True,
+                )
+            )
+        )
+        log.info("temporal.metrics_serving", port=settings.temporal_metrics_port)
+    return _runtime
+
+
 async def connect(settings: Any = None) -> Client:
     """Connect with the Pydantic converter so models cross the wire as models."""
     settings = settings or get_settings()
@@ -42,6 +80,7 @@ async def connect(settings: Any = None) -> Client:
         settings.temporal_address,
         namespace=settings.temporal_namespace,
         data_converter=pydantic_data_converter,
+        runtime=_metrics_runtime(settings),
     )
 
 
