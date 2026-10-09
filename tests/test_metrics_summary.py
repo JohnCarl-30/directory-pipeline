@@ -8,11 +8,13 @@ each one is a division that can be wrong in a way that looks plausible.
 
 from __future__ import annotations
 
+from typing import Any
+
 from directory_pipeline.config import Settings
 from directory_pipeline.observability import summarize
 
 
-def snap(**counters: float) -> dict:
+def snap(**counters: float) -> dict[str, Any]:
     return {
         "counters": [
             {"name": name, "labels": {}, "value": value} for name, value in counters.items()
@@ -110,7 +112,7 @@ def test_labelled_counters_are_summed_not_dropped():
 
 
 def test_rates_property_is_none_until_configured():
-    base = dict(
+    base: dict[str, Any] = dict(
         directory_base_url="http://directory.test", enrichment_base_url="http://enrich.test"
     )
     assert Settings(**base).llm_cost_rates is None

@@ -27,7 +27,7 @@ import time
 import uuid
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 
 from opensearchpy import AsyncOpenSearch, NotFoundError, RequestError
 from opensearchpy.helpers import async_bulk
@@ -321,10 +321,14 @@ class SearchIndex:
         ]
 
         with timed("index.bulk"):
-            succeeded, errors = await async_bulk(
+            succeeded, raw_errors = await async_bulk(
                 self.client, actions, raise_on_error=False, stats_only=False
             )
 
+        # `async_bulk` returns a count or a list for its second element
+        # depending on `stats_only`, and types it as the union of both. We pass
+        # False, so it is the list -- the per-document errors we log below.
+        errors = cast("list[Any]", raw_errors)
         if errors:
             METRICS.incr("index.bulk_errors", len(errors))
             for error in list(errors)[:5]:

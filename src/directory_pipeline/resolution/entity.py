@@ -218,7 +218,10 @@ def generate_candidates(records: list[CompanyRecord]) -> list[Candidate]:
         for i in range(len(bucket)):
             for j in range(i + 1, len(bucket)):
                 a, b = bucket[i], bucket[j]
-                pair = tuple(sorted((a.record_id, b.record_id)))
+                # Sorted so the pair is the same key whichever order the two
+                # records turn up in -- they block on several keys each.
+                first, second = sorted((a.record_id, b.record_id))
+                pair = (first, second)
                 if pair in compared:
                     continue
                 compared.add(pair)

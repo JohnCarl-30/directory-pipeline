@@ -11,6 +11,7 @@ backoffs that would take minutes in real time complete instantly.
 from __future__ import annotations
 
 import uuid
+from typing import Any
 
 import pytest
 from temporalio import activity
@@ -121,7 +122,7 @@ class FakeActivities:
             duration_s=0.1,
         )
 
-    def all(self) -> list:
+    def all(self) -> list[Any]:
         return [
             self.discover_listings,
             self.fetch_and_extract,

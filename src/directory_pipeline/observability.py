@@ -86,7 +86,11 @@ class _Metrics:
         self._sums: dict[str, float] = defaultdict(float)
         self._counts: dict[str, int] = defaultdict(int)
 
-    def incr(self, name: str, value: float = 1.0, **labels: str) -> None:
+    def incr(self, name: str, value: float = 1.0, /, **labels: str) -> None:
+        # `name` and `value` are positional-only so a label can be called
+        # "name" or "value" without silently landing on a parameter: every
+        # caller splats arbitrary **labels in, and `incr("x", **{"value": "a"})`
+        # would otherwise be a TypeError raised from the metrics layer.
         key = (name, tuple(sorted(labels.items())))
         with self._lock:
             self._counters[key] += value

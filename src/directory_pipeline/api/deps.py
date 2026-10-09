@@ -65,7 +65,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
 
 def get_resources(request: Request) -> Resources:
-    return request.app.state.resources
+    resources: Resources = request.app.state.resources
+    return resources
 
 
 def require_temporal(request: Request) -> Client:

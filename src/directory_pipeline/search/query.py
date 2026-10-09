@@ -210,11 +210,12 @@ class SearchClient:
         docs = hit["hits"]["hits"]
         if not docs:
             return {"error": "not found"}
-        return await self.client.explain(
+        explanation: dict[str, Any] = await self.client.explain(
             index=docs[0]["_index"],
             id=docs[0]["_id"],
             body={"query": build_query(q=q)["query"]},
         )
+        return explanation
 
 
 def _shape(response: dict[str, Any]) -> dict[str, Any]:

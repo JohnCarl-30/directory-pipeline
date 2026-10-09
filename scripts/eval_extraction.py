@@ -25,6 +25,7 @@ import sys
 from dataclasses import dataclass
 from dataclasses import field as dc_field
 from pathlib import Path
+from typing import Any
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
@@ -116,7 +117,7 @@ class LayerResult:
         ]
 
 
-def score(layer: LayerResult, extracted: dict, company, template: str, html: str) -> None:
+def score(layer: LayerResult, extracted: dict[str, Any], company, template: str, html: str) -> None:
     for key, attr in FIELDS.items():
         expected = norm(key, getattr(company, attr, None))
         actual = norm(key, extracted.get(key))

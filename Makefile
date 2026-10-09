@@ -15,9 +15,20 @@ demo: ## Run the full pipeline locally (no Docker, no credentials)
 test: ## Run the test suite
 	$(PY) -m pytest -q
 
+cov: ## Run the tests with coverage and enforce the floor
+	$(PY) -m pytest -q --cov --cov-report=term-missing
+
 lint: ## Lint and format-check
 	$(VENV)/bin/ruff check src tests scripts
 	$(VENV)/bin/ruff format --check src tests scripts
+
+types: ## Type check (strict over src, relaxed signatures in tests)
+	$(VENV)/bin/mypy
+
+audit: ## Check the locked dependencies for known vulnerabilities
+	$(VENV)/bin/pip-audit --skip-editable --progress-spinner=off
+
+check: lint types test ## Everything CI's first job runs
 
 fmt: ## Auto-format
 	$(VENV)/bin/ruff format src tests scripts
@@ -63,4 +74,5 @@ worker: ## Run a worker against localhost Temporal
 api: ## Run the API locally
 	$(PY) -m directory_pipeline.api.main
 
-.PHONY: help install demo test lint fmt up down clean logs crawl search reindex worker api
+.PHONY: help install demo test cov lint types audit check fmt up observe down clean logs \
+        crawl search reindex worker api

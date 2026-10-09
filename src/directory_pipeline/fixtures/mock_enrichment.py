@@ -26,7 +26,7 @@ from .data import ENRICHMENT
 app = FastAPI(title="Mock Enrichment API")
 
 RATE_PER_SECOND = 12.0
-BURST = 20
+BURST = 20.0
 FAILURE_RATE = 0.08
 
 _tokens = BURST

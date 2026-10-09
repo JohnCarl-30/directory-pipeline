@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, Literal, cast
 
 from mcp.server.mcpserver import MCPServer
 
@@ -23,6 +23,8 @@ from ..config import Settings, get_settings
 from ..observability import configure_logging, get_logger
 from ..search.index import SearchIndex
 from ..search.query import SearchClient
+
+TRANSPORTS = frozenset({"stdio", "sse", "streamable-http"})
 
 log = get_logger(__name__)
 
@@ -93,7 +95,8 @@ def build_server(settings: Settings | None = None) -> MCPServer:
     def client() -> SearchClient:
         if "search" not in state:
             state["search"] = SearchClient(settings)
-        return state["search"]
+        search: SearchClient = state["search"]
+        return search
 
     @server.tool(
         name="search_companies",
@@ -196,7 +199,18 @@ def main() -> None:
     import sys
 
     configure_logging(json_output=True)
+
+    # Validated rather than passed through. An unrecognised MCP_TRANSPORT used
+    # to reach `run()` and fail inside the SDK, which reports it as an
+    # unmatched overload -- a message that names neither the variable nor the
+    # value. A typo in a client's config is the likeliest way to get here.
     transport = os.environ.get("MCP_TRANSPORT", "stdio")
+    if transport not in TRANSPORTS:
+        raise SystemExit(
+            f"MCP_TRANSPORT={transport!r} is not supported; "
+            f"expected one of {', '.join(sorted(TRANSPORTS))}"
+        )
+
     if transport == "stdio" and sys.stdout.isatty():
         print(
             "dp-mcp speaks MCP over stdin/stdout; it is meant to be launched by a "
@@ -204,4 +218,4 @@ def main() -> None:
             "serve over HTTP instead.",
             file=sys.stderr,
         )
-    build_server().run(transport=transport)  # type: ignore[arg-type]
+    build_server().run(transport=cast('Literal["stdio", "sse", "streamable-http"]', transport))
