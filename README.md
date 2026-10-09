@@ -542,6 +542,18 @@ its own CI job.
 This exists because CI used to build the worker image and stop there, which
 proves an image compiles, not that it boots. See the third bug below.
 
+**It pulls from four registries, and that is deliberate.** Docker Hub
+rate-limits unauthenticated pulls per IP per six hours and CI runners share
+IPs, so this job twice went red in six seconds on `toomanyrequests` against a
+tree that had passed eighty minutes earlier -- a red X no commit caused and no
+re-run could clear. A job people learn to ignore is worse than no job. So
+OpenSearch and Prometheus come from their publishers' own registries, Postgres
+from AWS's mirror of the Docker Official image, and CI authenticates for the
+two Temporal images that exist on Docker Hub and nowhere else public. The
+script also tells the two apart: a rate limit reports as a rate limit rather
+than as "compose up failed", which otherwise sends you to read container logs
+that are empty because nothing started.
+
 Measured on the demo data, hammering search concurrently through a reindex:
 
 ```

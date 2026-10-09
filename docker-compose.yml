@@ -1,7 +1,25 @@
 # Full local stack. `make up` brings this online; `make demo` runs without it.
+#
+# Four of these images are pulled from a mirror rather than from Docker Hub, and
+# the reason is not preference. Docker Hub rate-limits unauthenticated pulls per
+# IP per six hours, GitHub's runners share IPs, and the integration job went red
+# for six hours on a limit it had no part in reaching -- a red X that no commit
+# caused and no re-run could clear. A job people learn to ignore is worse than
+# no job.
+#
+#   opensearch, opensearch-dashboards  public.ecr.aws/opensearchproject
+#                                      (OpenSearch publishes here themselves)
+#   postgres                           public.ecr.aws/docker/library
+#                                      (AWS's mirror of the Docker Official image)
+#   prometheus                         quay.io/prometheus
+#                                      (the Prometheus project's own registry)
+#
+# The two Temporal images stay: Temporal publishes to Docker Hub and nowhere
+# else public, which is why CI also authenticates. Both halves are needed --
+# this cuts the exposure, the login removes it.
 services:
   opensearch:
-    image: opensearchproject/opensearch:2.17.1
+    image: public.ecr.aws/opensearchproject/opensearch:2.17.1
     container_name: dp-opensearch
     environment:
       - discovery.type=single-node
@@ -22,7 +40,7 @@ services:
       retries: 12
 
   dashboards:
-    image: opensearchproject/opensearch-dashboards:2.17.1
+    image: public.ecr.aws/opensearchproject/opensearch-dashboards:2.17.1
     container_name: dp-dashboards
     environment:
       - OPENSEARCH_HOSTS=["http://opensearch:9200"]
@@ -32,7 +50,7 @@ services:
       opensearch: { condition: service_healthy }
 
   postgresql:
-    image: postgres:16-alpine
+    image: public.ecr.aws/docker/library/postgres:16-alpine
     container_name: dp-postgres
     environment:
       POSTGRES_PASSWORD: temporal
@@ -128,7 +146,7 @@ services:
     # Behind a profile: the stack is already ten containers, and this one is only
     # wanted when you are actually looking at metrics.
     #   docker compose --profile observability up -d prometheus
-    image: prom/prometheus:v3.1.0
+    image: quay.io/prometheus/prometheus:v3.1.0
     container_name: dp-prometheus
     profiles: [observability]
     command:
