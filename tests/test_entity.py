@@ -136,6 +136,72 @@ def test_shared_domain_across_cities_is_a_branch_not_a_duplicate():
     assert candidate.signals.get("location_conflict") == 1.0
 
 
+def test_a_chain_sharing_one_corporate_mailbox_is_still_a_branch():
+    """The case the fixtures never had, and the benchmark found.
+
+    `location_conflict` was calibrated against the one branch pair in the demo
+    data, which lists per-branch emails (dispatch@ and seattle@) -- so the
+    email term contributed nothing and the pair landed in review at 0.47.
+
+    A chain that publishes a single `info@` on every listing is at least as
+    common, and it used to add 0.20 of "independent" agreement for a fact
+    already counted by the shared domain: 0.55 + 0.30 + 0.20 - 0.38 = 0.67,
+    over the match threshold, silently collapsing every branch of the chain
+    into one record. scripts/bench_resolution.py merged 112 of 112 such pairs.
+
+    A mailbox at the shared domain is now not counted twice.
+    """
+    north = make(
+        "Zephyr Grove Ventures",
+        source_id="north",
+        website="https://zephyrgrove.com",
+        email="info@zephyrgrove.com",
+        city="San Diego",
+        region="CA",
+    )
+    south = make(
+        "Zephyr Grove Ventures",
+        source_id="south",
+        website="https://zephyrgrove.com",
+        email="info@zephyrgrove.com",
+        city="Tampa",
+        region="FL",
+    )
+
+    candidate = score_pair(north, south)
+    assert not candidate.is_match, candidate.signals
+    assert candidate.needs_review, candidate.score
+    assert "email" not in candidate.signals, "a mailbox at the shared domain is the same fact"
+
+
+def test_a_shared_mailbox_at_an_unrelated_domain_still_counts():
+    """Only the double-counting is suppressed, not the signal itself.
+
+    Two listings whose shared mailbox is at some *other* domain are asserting
+    something the website did not already say, so it stays independent
+    evidence and the pair stays a match.
+    """
+    left = make(
+        "Zephyr Grove Ventures",
+        source_id="left",
+        website="https://zephyrgrove.com",
+        email="ops@parentco.example",
+        city="San Diego",
+        region="CA",
+    )
+    right = make(
+        "Zephyr Grove Ventures",
+        source_id="right",
+        website="https://zephyrgrove.com",
+        email="ops@parentco.example",
+        city="Tampa",
+        region="FL",
+    )
+
+    candidate = score_pair(left, right)
+    assert candidate.signals.get("email") == 1.0
+
+
 def test_shared_domain_in_the_same_city_still_matches():
     """The conflict penalty must not break the ordinary duplicate case."""
     a = make(
