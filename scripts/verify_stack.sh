@@ -12,6 +12,11 @@ set -uo pipefail
 # Dashboards and the Temporal web UI are for humans, not for this check.
 SERVICES="opensearch postgresql temporal mock-directory mock-enrichment worker api"
 FAILED=0
+# Holds `compose up` output so a registry rate limit can be told apart from a
+# broken stack. Removed by cleanup(), which owns the one EXIT trap -- bash
+# keeps a single handler per signal, so a second `trap ... EXIT` here would
+# silently replace the teardown.
+UP_LOG="$(mktemp)"
 
 log()  { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
 pass() { printf '  \033[32mPASS\033[0m  %s\n' "$1"; }
@@ -38,6 +43,7 @@ cleanup() {
     log "Tearing down (volumes kept -- set CI=1 to wipe them)"
     docker compose down --remove-orphans >/dev/null 2>&1 || true
   fi
+  rm -f "$UP_LOG"
   exit "$FAILED"
 }
 trap cleanup EXIT
@@ -49,7 +55,27 @@ if ! docker info >/dev/null 2>&1; then
 fi
 
 log "Starting stack"
-docker compose up -d --build $SERVICES || { fail "compose up failed"; exit 1; }
+# Teed rather than captured: a build takes a minute and swallowing its progress
+# to inspect it afterwards turns that minute into a silent hang. `pipefail` is
+# set above, so the compose exit status still decides this.
+if ! docker compose up -d --build $SERVICES 2>&1 | tee "$UP_LOG"; then
+  # Name a registry rate limit as such. It arrives as a bare "compose up
+  # failed" otherwise, which reads like a broken stack and sends the next
+  # person to read container logs that do not exist -- nothing started, so
+  # every diagnostic below is empty, which is its own confusing signal.
+  if grep -qiE 'toomanyrequests|rate limit' "$UP_LOG"; then
+    fail "registry rate limit -- no image was pulled, the stack is not at fault"
+    # stdout, like fail(), so the explanation stays under the headline it
+    # explains. On stderr the two streams buffer separately and CI interleaved
+    # them backwards -- the advice printed above the failure it was advising on.
+    echo "  Docker Hub limits unauthenticated pulls per IP per 6h, and CI runners"
+    echo "  share IPs. Set DOCKERHUB_USERNAME/DOCKERHUB_TOKEN (repo secrets in CI,"
+    echo "  or 'docker login' locally). Re-running will not clear it."
+  else
+    fail "compose up failed"
+  fi
+  exit 1
+fi
 
 log "Waiting for the API to report ready"
 ready=0
