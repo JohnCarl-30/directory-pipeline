@@ -1,7 +1,7 @@
 [project]
 name = "directory-pipeline"
 version = "0.1.0"
-description = "Agentic directory crawl -> enrich -> resolve -> OpenSearch pipeline, orchestrated by Temporal"
+description = "Directory crawl -> extract -> enrich -> resolve -> search pipeline, orchestrated by Temporal"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "temporalio>=1.32,<2",
@@ -11,7 +11,12 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "opensearch-py[async]>=2.7",
-    "selectolax>=0.3.21",
+    # <1 is a hard incompatibility, not caution: selectolax 1.0 removed the
+    # Modest backend, and `extraction/cascade.py` imports
+    # `selectolax.parser.HTMLParser` from it. Moving to the lexbor backend is
+    # the real fix and belongs in its own change, with
+    # scripts/eval_extraction.py re-run to show the selectors still agree.
+    "selectolax>=0.3.21,<1",
     "structlog>=24.4",
     "pandas>=2.2",
     "tenacity>=9.0",
@@ -28,6 +33,10 @@ dev = [
     "ruff>=0.7",
     "respx>=0.21",
     "pytest-timeout>=2.3",
+    "pytest-cov>=6.0",
+    "mypy>=1.13",
+    "pandas-stubs>=2.2",
+    "pip-audit>=2.7",
 ]
 
 [project.scripts]
@@ -57,3 +66,57 @@ target-version = "py311"
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B", "ASYNC"]
 ignore = ["B008"]
+
+[tool.mypy]
+python_version = "3.11"
+strict = true
+# Tests and scripts are checked too, with one relaxation: a test function with
+# no arguments and no return value gains nothing from `-> None` on 220 of them,
+# and requiring it would have been 288 edits of pure ceremony. Everything that
+# actually carries a type -- fixtures, helpers, the code under test -- is still
+# checked strictly.
+files = ["src", "tests", "scripts"]
+
+[[tool.mypy.overrides]]
+# `tests.*` needs tests/__init__.py, which is there so this override covers
+# every test file added later instead of being a list to keep up to date.
+module = ["tests.*", "run_local", "eval_extraction"]
+disallow_untyped_defs = false
+disallow_incomplete_defs = false
+disallow_untyped_calls = false
+# A state machine mutates the attribute under test between assertions, and
+# mypy keeps the narrowing from the previous assert -- so `state is OPEN`
+# followed by a transition and `state is HALF_OPEN` reads as impossible.
+disable_error_code = ["comparison-overlap"]
+
+# Third-party packages that ship no annotations. Named individually rather than
+# globally: `ignore_missing_imports = true` across the board would also swallow
+# a typo in one of our own module paths.
+[[tool.mypy.overrides]]
+module = ["selectolax.*", "opensearchpy.*", "respx.*", "uvicorn.*"]
+ignore_missing_imports = true
+
+[tool.coverage.run]
+source = ["directory_pipeline"]
+branch = true
+
+[tool.coverage.report]
+# 73, against 76 measured, is a regression guard rather than a quality claim.
+# Two things hold the number down and neither is untested code:
+#
+#   * the ten cluster-dependent tests skip themselves in CI, taking most of
+#     search/index.py and search/query.py with them;
+#   * the API routes, the activities, the worker and the crawler are covered by
+#     scripts/verify_stack.sh and scripts/run_local.py -- the two CI jobs that
+#     exercise the most code and report no coverage at all, because one runs
+#     the deployable in containers and the other is a script, not a test.
+#
+# Reading 76% as "a quarter of this is untested" would be wrong in both
+# directions, which is why the number comes with this note attached.
+fail_under = 73
+show_missing = true
+exclude_also = [
+    "if TYPE_CHECKING:",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]

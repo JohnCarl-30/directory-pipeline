@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -43,6 +43,17 @@ class Settings(BaseSettings):
     request_timeout_s: float = 20.0
     user_agent: str = "directory-pipeline/0.1 (+https://example.com/bot; contact=devs@example.com)"
 
+    # Politeness. On by default: a crawler that has to be configured into
+    # following the rules is a crawler that ships not following them.
+    obey_robots: bool = True
+    robots_cache_ttl_s: float = 3600.0
+
+    # Browser-string rotation. Off, and incompatible with obey_robots -- see
+    # the validator. Kept because it is genuinely useful against a host you
+    # own (our own mock, a staging target) when you are testing how the client
+    # behaves under fingerprint churn.
+    rotate_user_agents: bool = False
+
     # Agentic extraction
     anthropic_api_key: str = ""
     extraction_model: str = "claude-opus-5"
@@ -73,6 +84,32 @@ class Settings(BaseSettings):
         if isinstance(v, str):
             return [p.strip() for p in v.split(",") if p.strip()]
         return v
+
+    @model_validator(mode="after")
+    def _identity_must_be_coherent(self) -> Settings:
+        """Refuse to both obey robots.txt and lie about who is asking.
+
+        robots.txt groups are selected by the product token in `user_agent`, so
+        with rotation on we would read the rules written for
+        `directory-pipeline` and then send requests claiming to be Chrome. The
+        host's logs would show traffic it has no rules for, from an agent that
+        is, in its records, ignoring robots.txt entirely.
+
+        This fails at startup rather than warning, because the two settings are
+        individually reasonable and the combination is not -- which is exactly
+        the shape of bug that survives a code review and is discovered by
+        somebody else's abuse desk.
+        """
+        if self.obey_robots and self.rotate_user_agents:
+            raise ValueError(
+                "ROTATE_USER_AGENTS=true is incompatible with OBEY_ROBOTS=true: "
+                "robots.txt rules are matched against the product token in USER_AGENT, "
+                "so rotating browser strings would claim rules the requests do not "
+                "identify as. Either leave rotation off (obey robots, identify "
+                "honestly), or set OBEY_ROBOTS=false to opt out explicitly -- which is "
+                "only defensible against a host you own."
+            )
+        return self
 
     @property
     def opensearch_auth(self) -> tuple[str, str] | None:

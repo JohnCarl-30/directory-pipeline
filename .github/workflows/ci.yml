@@ -4,6 +4,9 @@ on:
   push: { branches: [main] }
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     runs-on: ubuntu-latest
@@ -25,15 +28,52 @@ jobs:
           .venv/bin/ruff check src tests scripts
           .venv/bin/ruff format --check src tests scripts
 
+      - name: Type check
+        # --strict across src, and src only in the strictest sense: tests keep
+        # their unannotated `def test_x():` signatures (see the override in
+        # pyproject.toml) because 220 `-> None`s buy nothing. Everything that
+        # carries a type is checked.
+        run: .venv/bin/mypy
+
       - name: Test
         # No services needed: the Temporal tests use the time-skipping test
         # environment and the pipeline tests run against in-process mocks.
-        run: .venv/bin/python -m pytest -q
+        # --cov enforces the floor in [tool.coverage.report].
+        run: .venv/bin/python -m pytest -q --cov --cov-report=term-missing
 
       - name: End-to-end smoke run
         # Proves the whole pipeline still wires together, not just the units.
         # Exits non-zero if extraction, enrichment, or resolution breaks.
         run: .venv/bin/python scripts/run_local.py
+
+  audit:
+    # Separate job so a new advisory against a transitive dependency reports as
+    # its own red X rather than looking like a test failure. It is also the one
+    # job whose result can change without a commit, which is the whole point.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: uv sync --frozen --all-extras
+
+      - name: Audit dependencies for known vulnerabilities
+        # Audits the installed environment, which `uv sync --frozen` built from
+        # uv.lock -- so this checks the versions that actually ship, not the
+        # ranges pyproject declares. A range that *could* resolve to a patched
+        # version says nothing about what got installed.
+        #
+        # `--skip-editable` drops this project itself: it is not on PyPI and
+        # never will be, so it has no advisory feed to check. That also costs
+        # us `--strict`, which counts any unauditable distribution as a
+        # failure and would therefore fail on our own package forever. The
+        # trade is that a third-party package missing from the feed warns
+        # instead of failing; the skip table above is printed either way.
+        run: .venv/bin/pip-audit --skip-editable --progress-spinner=off
 
   integration:
     # Building the image proves it compiles, not that it runs. A worker that

@@ -18,6 +18,7 @@ call fails expensively (retry less); a bulk index is mostly all-or-nothing.
 from __future__ import annotations
 
 from datetime import timedelta
+from typing import TypedDict
 
 from temporalio.common import RetryPolicy
 
@@ -75,30 +76,49 @@ REINDEX_RETRY = RetryPolicy(
     maximum_attempts=3,
 )
 
-DISCOVER_TIMEOUTS = {
+
+class ActivityTimeouts(TypedDict, total=False):
+    """The three timeouts, as a type rather than a bare dict.
+
+    These are splatted into `workflow.execute_activity(**TIMEOUTS)`, and a
+    plain `dict[str, timedelta]` splatted into a call with named keyword
+    parameters is unverifiable -- a typo'd `start_to_close` would be accepted
+    here and raise at workflow runtime, which is the worst place to find it.
+    As a TypedDict the keys are checked where they are written.
+
+    `total=False` because indexing sets no heartbeat: it is one bulk call, not
+    a long loop with progress to report.
+    """
+
+    start_to_close_timeout: timedelta
+    schedule_to_close_timeout: timedelta
+    heartbeat_timeout: timedelta
+
+
+DISCOVER_TIMEOUTS: ActivityTimeouts = {
     "start_to_close_timeout": timedelta(minutes=15),
     "schedule_to_close_timeout": timedelta(minutes=45),
     "heartbeat_timeout": timedelta(minutes=2),
 }
 
-FETCH_TIMEOUTS = {
+FETCH_TIMEOUTS: ActivityTimeouts = {
     "start_to_close_timeout": timedelta(minutes=10),
     "schedule_to_close_timeout": timedelta(minutes=30),
     "heartbeat_timeout": timedelta(minutes=1),
 }
 
-ENRICH_TIMEOUTS = {
+ENRICH_TIMEOUTS: ActivityTimeouts = {
     "start_to_close_timeout": timedelta(minutes=10),
     "schedule_to_close_timeout": timedelta(minutes=40),
     "heartbeat_timeout": timedelta(minutes=1),
 }
 
-INDEX_TIMEOUTS = {
+INDEX_TIMEOUTS: ActivityTimeouts = {
     "start_to_close_timeout": timedelta(minutes=5),
     "schedule_to_close_timeout": timedelta(minutes=20),
 }
 
-REINDEX_TIMEOUTS = {
+REINDEX_TIMEOUTS: ActivityTimeouts = {
     "start_to_close_timeout": timedelta(hours=2),
     "schedule_to_close_timeout": timedelta(hours=6),
     "heartbeat_timeout": timedelta(minutes=5),

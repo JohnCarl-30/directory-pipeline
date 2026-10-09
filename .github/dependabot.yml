@@ -1,0 +1,31 @@
+version: 2
+
+updates:
+  # uv.lock is the file that decides what ships, and CI installs it with
+  # --frozen. Without this, a patched dependency only arrives when somebody
+  # happens to re-resolve by hand.
+  - package-ecosystem: uv
+    directory: /
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      # One PR for the dev tooling. A ruff or mypy bump is reviewed by reading
+      # whether CI is still green, and five separate PRs asking that same
+      # question is five times the work for the same answer.
+      dev-tooling:
+        patterns: ["ruff", "mypy", "pytest*", "respx", "pip-audit", "pandas-stubs"]
+        update-types: ["minor", "patch"]
+      runtime-patches:
+        patterns: ["*"]
+        update-types: ["patch"]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: monthly
+
+  - package-ecosystem: docker
+    directory: /docker
+    schedule:
+      interval: monthly

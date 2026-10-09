@@ -199,8 +199,7 @@ class CrawlDirectoryWorkflow:
 
             # Dedupe while preserving order -- determinism matters on replay,
             # and a set alone would reorder between runs.
-            seen: set[str] = set()
-            urls = [u for u in all_urls if not (u in seen or seen.add(u))]
+            urls = list(dict.fromkeys(all_urls))
             result.listings_found += len(urls)
             result.pages_crawled += len(request.categories) * request.max_pages
 
@@ -289,13 +288,14 @@ class ReindexWorkflow:
 
     @workflow.run
     async def run(self, request: ReindexRequest) -> ReindexResult:
-        return await workflow.execute_activity(
+        result: ReindexResult = await workflow.execute_activity(
             "reindex_alias",
             args=[request],
             result_type=ReindexResult,
             retry_policy=REINDEX_RETRY,
             **REINDEX_TIMEOUTS,
         )
+        return result
 
 
 @workflow.defn(name="ScheduledCrawlWorkflow")

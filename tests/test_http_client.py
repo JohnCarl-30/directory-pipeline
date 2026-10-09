@@ -16,7 +16,21 @@ from directory_pipeline.scraping.client import (
 
 
 def fast_settings(**overrides) -> Settings:
-    return Settings(crawl_rps=1000.0, crawl_burst=1000, request_timeout_s=2.0, **overrides)
+    """Retry mechanics, with the politeness gate out of the way.
+
+    `obey_robots=False` keeps these tests about backoff and classification: with
+    it on, every case below would also need a `/robots.txt` route, and a missing
+    one would fail as a robots error rather than as the retry bug under test.
+    The gate's own behaviour -- including that it is on by default -- is
+    tests/test_robots.py.
+    """
+    return Settings(
+        crawl_rps=1000.0,
+        crawl_burst=1000,
+        request_timeout_s=2.0,
+        obey_robots=False,
+        **overrides,
+    )
 
 
 @respx.mock

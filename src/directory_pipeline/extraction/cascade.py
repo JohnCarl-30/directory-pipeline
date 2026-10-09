@@ -193,11 +193,17 @@ class DomExtractor:
 
     @staticmethod
     def _value(node: Any) -> str | None:
-        """Prefer the attribute that carries the real value over display text."""
+        """Prefer the attribute that carries the real value over display text.
+
+        `node` is Any because selectolax ships no annotations, so every value
+        pulled off it is annotated on the way out -- otherwise the Any spreads
+        into the caller and `_value` stops being checked at all.
+        """
         for attr in ("content", "datetime"):
-            if val := node.attributes.get(attr):
+            val: str | None = node.attributes.get(attr)
+            if val:
                 return val.strip()
-        href = node.attributes.get("href")
+        href: str | None = node.attributes.get("href")
         if href:
             if href.startswith("mailto:"):
                 return href[7:].strip()
@@ -206,9 +212,10 @@ class DomExtractor:
             if href.startswith(("http://", "https://")):
                 # Only trust href as a value for link-shaped fields; the text of
                 # an <a> is often "Visit site", which is useless.
-                text = node.text(strip=True)
+                text: str | None = node.text(strip=True)
                 return href.strip() if not text or len(text) < 30 else text
-        return node.text(strip=True) or None
+        own_text: str | None = node.text(strip=True)
+        return own_text or None
 
 
 class TextFallbackExtractor:
@@ -450,7 +457,11 @@ class LLMExtractor:
         text = next((b.text for b in response.content if b.type == "text"), None)
         if not text:
             return {}
-        return json.loads(text)  # schema-constrained: guaranteed parseable
+        # Schema-constrained by output_config.format, so it is guaranteed
+        # parseable -- but json.loads is still Any, and letting that escape
+        # would unteach the caller everything about this return type.
+        parsed: dict[str, Any] = json.loads(text)
+        return parsed
 
 
 class Extractor:

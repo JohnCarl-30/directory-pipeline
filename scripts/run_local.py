@@ -39,7 +39,9 @@ from directory_pipeline.observability import METRICS, configure_logging  # noqa:
 from directory_pipeline.reporting import qa  # noqa: E402
 from directory_pipeline.resolution.adjudicator import Adjudicator  # noqa: E402
 from directory_pipeline.resolution.entity import generate_candidates, resolve  # noqa: E402
+from directory_pipeline.scraping.client import RobotsDisallowedError  # noqa: E402
 from directory_pipeline.scraping.crawler import DirectoryCrawler  # noqa: E402
+from directory_pipeline.scraping.robots import robots_url_for  # noqa: E402
 from directory_pipeline.search.index import SearchIndex  # noqa: E402
 
 
@@ -104,6 +106,29 @@ async def run(args: argparse.Namespace) -> int:
     adjudicator = Adjudicator(settings)
 
     try:
+        # 0. politeness -----------------------------------------------------
+        banner("0. robots.txt")
+        if crawler.client.robots is None:
+            print("  OBEY_ROBOTS is off -- nothing below was checked against any rules")
+        else:
+            listing_url = f"{settings.directory_base_url}/directory/"
+            robots_verdict = await crawler.client.robots.check(listing_url)
+            print(f"  fetched        {robots_url_for(settings.directory_base_url)}")
+            print(f"  identifying as {settings.user_agent}")
+            print(f"  rules from     {robots_verdict.reason}")
+            print(f"  rate directive {robots_verdict.max_rps or 'none in our group'}")
+
+            # The mock serves a real page at /private/secret-listing. Nothing
+            # on the server side stops us reading it; the only thing that does
+            # is the rule, which makes this a demonstrable refusal rather than
+            # a claim.
+            blocked = f"{settings.directory_base_url}/private/secret-listing"
+            try:
+                await crawler.client.get(blocked)
+                print("  !! /private/secret-listing was FETCHED -- the gate did not run")
+            except RobotsDisallowedError as exc:
+                print(f"  refused        /private/secret-listing -- {exc.reason}")
+
         # 1. discover -------------------------------------------------------
         banner("1. Discover")
         urls: list[str] = []
@@ -173,7 +198,7 @@ async def run(args: argparse.Namespace) -> int:
         elif borderline:
             print(f"  {len(borderline)} borderline pair(s) left unmerged (no ANTHROPIC_API_KEY)")
 
-        cluster_of, canonical_of = resolve(records, accepted=accepted)
+        cluster_of, canonical_of = resolve(records, accepted=accepted, candidates=candidates)
         companies = [
             c.model_copy(
                 update={

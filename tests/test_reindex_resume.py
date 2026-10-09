@@ -12,9 +12,11 @@ the task id and target index recorded there are enough to reattach.
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, cast
 
 import pytest
+from opensearchpy import AsyncOpenSearch
+from temporalio import activity
 
 from directory_pipeline.config import Settings
 from directory_pipeline.orchestration.activities import _resume_from_heartbeat
@@ -86,7 +88,10 @@ def index() -> tuple[SearchIndex, FakeClient]:
         enrichment_base_url="http://enrich.test",
         opensearch_alias="companies",
     )
-    return SearchIndex(settings, client=client), client
+    # FakeClient implements only the handful of methods the reindex path
+    # calls; `cast` is the admission that it is a double, not an
+    # AsyncOpenSearch.
+    return SearchIndex(settings, client=cast("AsyncOpenSearch", client)), client
 
 
 async def test_a_fresh_reindex_creates_an_index_and_submits_a_copy(index):
@@ -156,5 +161,5 @@ def test_resume_requires_both_the_task_and_the_target(monkeypatch):
             {"task_id": "n:1", "target_index": "companies-v1"},
         ),
     ]:
-        monkeypatch.setattr(mod.activity, "info", lambda d=details: FakeInfo(d))
+        monkeypatch.setattr(activity, "info", lambda d=details: FakeInfo(d))
         assert mod._resume_from_heartbeat() == expected, details

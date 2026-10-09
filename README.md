@@ -36,11 +36,13 @@ which is exactly the layer Temporal owns.
 | Zero-downtime reindex | `search/index.py::reindex` | Build new → copy → refresh → **atomic** alias swap → keep the old index as the rollback path. |
 | Relevance tuning | `search/query.py` | Filter vs. query context, per-field boosts, a deliberately gentle completeness multiplier. |
 | Durable orchestration | `orchestration/` | Child workflow per batch for blast-radius containment; per-failure-shape retry policies; heartbeats; `continue_as_new`. |
+| Crawl politeness | `scraping/robots.py` | robots.txt fetched per origin and obeyed, `Crawl-delay` wired into the token bucket, one honest product token with a contact URL. A 4xx on robots.txt allows; a 5xx forbids. |
 | Safe fan-out | `scraping/`, `enrichment/` | Token bucket, circuit breaker, full-jitter backoff, proxy rotation, idempotency keys, single-flight dedupe, TTL cache. |
 | Entity resolution | `resolution/entity.py` | Multi-key blocking, weighted probabilistic scoring, union-find clustering. |
 | Data QA | `reporting/qa.py` | Pandas coverage/validity gates that block a release, not just decorate it. |
 | Measured relevance | `api/static/index.html` | A search console that renders the facet aggregations the engine ranked with, and the BM25 scoring tree behind any hit — so relevance is inspectable rather than argued about. |
 | MCP integration | `mcp/server.py` | The directory exposed as MCP tools, reusing `SearchClient` so ranking cannot drift from `/search`. Results trimmed by default, because a tool result is spent from the client's context. |
+| Resolution at scale | `scripts/bench_resolution.py` | 100k records, known answers: 1,319x fewer comparisons than brute force, 99.86% blocking recall, 100% precision. Found two bugs, including one that merged every branch of every chain. |
 | Extraction accuracy | `scripts/eval_extraction.py` | Per-layer, per-field precision and recall against the fixtures the pages are rendered from. The cascade is a measurement, not a claim. |
 
 ---
@@ -79,10 +81,15 @@ grow past the limit on a large run.
 ```bash
 make install     # uv sync from uv.lock -- exact pinned versions
 make demo        # full pipeline against in-process mocks
-make test        # 198 tests (~11s; 10 skip themselves without a cluster)
+make test        # 226 tests (~6s; 10 skip themselves without a cluster)
+make check       # lint + mypy --strict + tests, which is CI's first job
 
 python scripts/eval_extraction.py    # extraction accuracy, per layer and field
+python scripts/bench_resolution.py   # entity resolution over 100k records (~55s)
 ```
+
+`make types` runs mypy alone, `make cov` adds the coverage floor, and
+`make audit` checks the locked dependencies against the advisory feed.
 
 ### Full stack
 
@@ -265,6 +272,26 @@ Duplicates are indexed with `duplicate_of` set rather than deleted: dropping
 them loses the provenance that proves the merge was right. Search filters them
 out with `is_canonical`.
 
+Measured at 100k records against a corpus with known answers, the design
+claims hold and two bugs did not — see [`docs/benchmarks.md`](docs/benchmarks.md):
+
+```
+  brute force n(n-1)/2            5,000,150,001
+  pairs offered by blocking           3,792,285     1,319x reduction
+  blocking recall (the ceiling)           99.86%
+  recall / precision              97.70% / 100.00%
+  branches wrongly merged              0 of 5,237   (112 of 112 before the fix)
+```
+
+The branch case is the one worth reading. `location_conflict` was calibrated
+against the single branch pair in the fixtures, which lists *per-branch* emails
+— so the email term contributed nothing and the pair scored into review exactly
+as intended. A chain publishing one `info@` on every listing added 0.20 for a
+fact the shared domain had already asserted, cleared the match threshold at 0.67,
+and collapsed every branch into one record. The fix is not a bigger penalty: a
+mailbox at the shared domain is the same fact twice, and is no longer counted
+as independent agreement when the localities disagree.
+
 ### Zero-downtime reindex
 
 Applications never name an index — they talk to an alias.
@@ -280,6 +307,60 @@ rollback path (`POST /ingest/index/rollback`).
 One caveat named honestly: writes landing on the source index *after* the copy
 begins are not carried over. In production you either pause the writer for the
 swap or dual-write during the copy.
+
+### Politeness is a property of the client, not of the caller
+
+`GET /robots.txt` once per origin, cached, and the verdict gates every outbound
+request before it costs a token from the bucket or a slot in the breaker's
+accounting:
+
+```
+robots  ->  circuit breaker  ->  rate limiter  ->  request  ->  classify  ->  backoff
+```
+
+The gate sits under the client rather than in the crawler because the crawler is
+one caller. A rule enforced in one call site is a rule the next call site
+forgets.
+
+Four decisions in there, three of which the standard leaves to the crawler:
+
+- **A missing robots.txt allows everything; an unreachable one allows nothing.**
+  RFC 9309 splits on the status class: 4xx means no rules exist, 5xx means the
+  host cannot currently tell you what they are. Guessing permissive in the
+  second case is how a crawler hammers a host that is already in trouble.
+  Unavailability is cached for 60s rather than the full hour, so a blip costs a
+  minute of crawling.
+- **`Crawl-delay` lowers the token bucket and never raises it.** The stricter of
+  the host's directive and `CRAWL_RPS` wins, and burst drops to 1 with it — a
+  bucket holding 10 tokens at 0.1 rps would let a batch fire ten immediate
+  requests at a host that asked for one every ten seconds, which honors the
+  average and ignores the request.
+- **One product token, with a contact URL.** `Settings.user_agent` was always
+  the honest identity this crawler should present and, until now, nothing read
+  it: every request went out as a rotated Chrome string. Rotation still exists,
+  behind `ROTATE_USER_AGENTS`, and `Settings` **refuses to start** with both it
+  and `OBEY_ROBOTS` on. Reading the group written for `directory-pipeline` and
+  then announcing yourself as Chrome is not a configuration, it is a
+  contradiction — and the host's logs would record an agent ignoring robots.txt
+  entirely.
+- **It does not apply to the enrichment API.** robots.txt governs crawling
+  published content; an authenticated call to a vendor under contract is neither.
+  `EnrichmentProvider` passes `obey_robots=False` in code, which also avoids the
+  trap where a vendor's API host — which has no reason to serve robots.txt at
+  all — silently halts enrichment the day that 404 becomes a 502.
+
+The mock directory serves a real `robots.txt` with two rule groups and a
+`/private/secret-listing` page that is perfectly fetchable and disallowed, so
+`make demo` opens by refusing something rather than by claiming it would:
+
+```
+0. robots.txt
+  fetched        http://127.0.0.1:57950/robots.txt
+  identifying as directory-pipeline/0.1 (+https://example.com/bot; contact=devs@example.com)
+  rules from     robots.txt
+  rate directive none in our group
+  refused        /private/secret-listing -- disallowed by robots.txt
+```
 
 ### Fan-out that upstreams survive
 
@@ -398,7 +479,7 @@ src/directory_pipeline/
 ├── config.py             env-driven settings
 ├── observability.py      structured logging + metrics
 ├── domain/models.py      versioned contracts crossing every boundary
-├── scraping/             rate_limit · circuit · client · crawler
+├── scraping/             robots · rate_limit · circuit · client · crawler
 ├── extraction/           normalize (deterministic) · agent (3-layer)
 ├── enrichment/           idempotency, single-flight, TTL cache
 ├── resolution/           entity (blocking+scoring) · adjudicator (tool calling)
@@ -412,7 +493,7 @@ src/directory_pipeline/
 
 ## Testing
 
-198 tests. 188 need neither network nor Docker; the remaining 10 **skip
+226 tests. 216 need neither network nor Docker; the remaining 10 **skip
 themselves** when no cluster is reachable — nine OpenSearch integration tests
 and one that launches the MCP server as a subprocess.
 
@@ -432,6 +513,13 @@ and reported; a transient one is absorbed silently.
 
 `timeout = 120` is set in pytest config: a hung test is a failed test, not a
 blocked CI run.
+
+CI runs four gates on the no-dependency suite — `ruff`, `mypy --strict`,
+`pytest` with a coverage floor, and the end-to-end smoke run — plus `pip-audit`
+against the locked dependency set as its own job, so a new advisory reports as
+its own red X rather than looking like a test failure. Dependabot keeps
+`uv.lock` moving, since CI installs with `--frozen` and a lockfile nobody
+re-resolves is a lockfile that quietly ages.
 
 The integration tests cover what a unit test structurally cannot — that the
 mappings are actually accepted, that the analyzers tokenize the way the query
@@ -506,6 +594,32 @@ nothing at all, which is why the integration job now exists:
   copy filling one index while swapping the alias to another, publishing an empty
   one.
 
+### What turning on the type checker found
+
+`mypy --strict` over `src` reported 39 errors on first run. Most were the
+expected kind — an untyped third-party library leaking `Any` through a return —
+and two were real:
+
+- **`METRICS.incr(name, value=1.0, **labels)` could have a label land on
+  `value`.** Every caller splats arbitrary labels in, so
+  `incr("x", **{"value": "a"})` was a `TypeError` raised from the metrics layer
+  about an argument the caller never knowingly passed. `name` and `value` are
+  positional-only now, which makes a label called `value` just a label.
+- **`MCP_TRANSPORT` was passed through unvalidated.** A typo in a client's
+  config reached `server.run()` and failed inside the SDK as an unmatched
+  overload — a message naming neither the variable nor the value. It is checked
+  against the three supported transports at startup now, which is also the only
+  way a `Literal` parameter can be satisfied honestly.
+
+The five activity timeout dicts became a `TypedDict` for a related reason: they
+are splatted into `execute_activity(**TIMEOUTS)`, and as bare
+`dict[str, timedelta]` a mistyped `start_to_close` was accepted where it was
+written and raised at workflow runtime, which is the worst place to find it.
+
+The package also now ships `py.typed`. It was fully annotated and advertising
+none of it, so nothing downstream — including mypy checking this repo's own
+tests — could see a single type.
+
 ---
 
 ## Known limitations
@@ -520,5 +634,16 @@ nothing at all, which is why the integration job now exists:
   process.
 - Single-shard index, suited to the demo's data volume rather than copied as a
   default.
+- **robots.txt is parsed by `urllib.robotparser`, which resolves rules by first
+  match within a group; RFC 9309 specifies longest match.** The divergence shows
+  up only in groups that both allow and deny overlapping prefixes, and it errs
+  toward fetching — the wrong direction to err, which is why it is written here
+  and in the module rather than left to be discovered. A conforming parser is
+  the fix if this ever points at a site whose robots.txt is written that way.
+- Coverage is 76% with the cluster-dependent tests skipped, and the floor in CI
+  is 73%. The thin spots — the API routes, the activities, the worker, the
+  crawler — are the code `scripts/verify_stack.sh` and `scripts/run_local.py`
+  exercise, and neither reports coverage. The number is a regression guard, not
+  a quality claim.
 - Verified locally only: no cloud deployment, and nothing here has run against a
   real directory site.

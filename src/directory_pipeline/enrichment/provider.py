@@ -67,7 +67,16 @@ class EnrichmentProvider:
     def __init__(self, settings: Settings, client: ResilientClient | None = None) -> None:
         self.settings = settings
         self.client = client or ResilientClient(
-            settings, rps=settings.enrich_rps, burst=max(1, int(settings.enrich_rps))
+            settings,
+            rps=settings.enrich_rps,
+            burst=max(1, int(settings.enrich_rps)),
+            # robots.txt governs crawling a site's published content. This is
+            # an authenticated API call to a vendor we hold an account with,
+            # and the rate we may call it at is in that contract, not in a
+            # file served for search engines. Leaving the gate on would also
+            # mean a vendor whose /robots.txt 5xx'd -- a file their API host
+            # has no reason to serve at all -- silently halted enrichment.
+            obey_robots=False,
         )
         self._owns_client = client is None
         self.cache = TTLCache()
@@ -103,7 +112,14 @@ class EnrichmentProvider:
         if task is None:
             task = asyncio.create_task(self._fetch(company, key))
             self._inflight[key] = task
-            task.add_done_callback(lambda _t, k=key: self._inflight.pop(k, None))
+
+            # `k=key` binds this task's key at definition time. A closure over
+            # `key` would read whichever key the loop variable holds when the
+            # callback eventually fires, and evict the wrong entry.
+            def _forget(_task: asyncio.Task[dict[str, Any]], k: str = key) -> None:
+                self._inflight.pop(k, None)
+
+            task.add_done_callback(_forget)
         else:
             METRICS.incr("enrich.coalesced")
 
@@ -131,7 +147,7 @@ class EnrichmentProvider:
                 response = await self.client.get(url, headers=headers, params=params)
 
         try:
-            payload = json.loads(response.text)
+            payload: dict[str, Any] = json.loads(response.text)
         except json.JSONDecodeError:
             log.warning("enrich.bad_json", url=url)
             return {}

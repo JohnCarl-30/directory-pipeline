@@ -9,16 +9,19 @@ Three page templates, because a real directory is never one template:
   stub      -- near-empty listing; should end up low-confidence and sparse
 
 It also returns 429 on a burst, so the token bucket and Retry-After handling
-have something real to react to.
+have something real to react to, and serves a real `robots.txt` with two rule
+groups and a disallowed path that is otherwise perfectly fetchable -- so the
+politeness gate has something to refuse.
 """
 
 from __future__ import annotations
 
 import time
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 
 from fastapi import FastAPI, Request, Response
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 
 from .data import BY_CATEGORY, BY_SLUG, Company
 
@@ -31,7 +34,9 @@ BURST_WINDOW_S = 1.0  # ...per second, per client
 
 
 @app.middleware("http")
-async def burst_limiter(request: Request, call_next):
+async def burst_limiter(
+    request: Request, call_next: Callable[[Request], Awaitable[Response]]
+) -> Response:
     """Return a real 429 with Retry-After when hammered."""
     client = request.client.host if request.client else "anon"
     now = time.monotonic()
@@ -157,6 +162,49 @@ async def company(slug: str) -> HTMLResponse:
         return HTMLResponse("<html><body><h1>Not found</h1></body></html>", 404)
     renderers = {"microdata": _microdata_page, "drifted": _drifted_page, "stub": _stub_page}
     return HTMLResponse(renderers[c.template](c))
+
+
+# Two groups, because a real site rarely has one. The wildcard group carries a
+# Crawl-delay that would pace a generic crawler at one request every two
+# seconds; the group naming our product token carries none, which is the
+# arrangement a site operator reaches after being asked for an allowance. The
+# demo therefore runs at full speed *and* honors what applies to it -- and the
+# delay-honoring path is covered by tests/test_robots.py rather than by making
+# `make demo` take an extra 25 seconds to prove a point.
+#
+# /private/ is disallowed for everyone, and there is a real page behind it, so
+# refusing to fetch it is a demonstrable refusal rather than a claimed one.
+ROBOTS_TXT = """User-agent: *
+Crawl-delay: 2
+Disallow: /private/
+
+User-agent: directory-pipeline
+Disallow: /private/
+
+Sitemap: /sitemap.xml
+"""
+
+
+@app.get("/robots.txt", response_class=PlainTextResponse)
+async def robots() -> str:
+    return ROBOTS_TXT
+
+
+@app.get("/private/secret-listing", response_class=HTMLResponse)
+async def private_listing() -> str:
+    """Reachable, parseable, and off limits.
+
+    Nothing stops a crawler fetching this but the rule in robots.txt, which is
+    the point: a politeness check that can only be tested against a 403 is
+    testing the server's enforcement, not the client's manners.
+    """
+    return (
+        "<!doctype html><html><body>"
+        "<h1 class='company-name'>Unlisted Holdings</h1>"
+        "<p class='company-description'>If this text reaches the index, "
+        "the robots.txt gate did not run.</p>"
+        "</body></html>"
+    )
 
 
 @app.get("/healthz")

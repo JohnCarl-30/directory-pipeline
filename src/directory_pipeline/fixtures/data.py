@@ -14,6 +14,7 @@ that it contains the failure modes the pipeline claims to handle:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Any
 
 
 @dataclass
@@ -244,7 +245,7 @@ BY_SLUG: dict[str, Company] = {c.slug: c for c in COMPANIES}
 
 # Enrichment records, keyed by domain. Intentionally incomplete: some companies
 # have no enrichment record at all, which is the normal case in production.
-ENRICHMENT: dict[str, dict] = {
+ENRICHMENT: dict[str, dict[str, Any]] = {
     "northwindanalytics.com": {
         "id": "ent_8812",
         "industry": "Software",

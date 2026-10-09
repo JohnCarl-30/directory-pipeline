@@ -148,6 +148,13 @@ def jaro_winkler(a: str, b: str) -> float:
     return jaro + prefix * 0.1 * (1 - jaro)
 
 
+def _email_domain(email: str | None) -> str | None:
+    """The part after the @, or None. Not a validator -- a comparison key."""
+    if not email or "@" not in email:
+        return None
+    return email.rsplit("@", 1)[1].lower() or None
+
+
 def _fold(value: str | None) -> str:
     if not value:
         return ""
@@ -191,6 +198,19 @@ def score_pair(left: CompanyRecord, right: CompanyRecord) -> Candidate:
     # locality; absence of an address is not evidence of a different one.
     if signals.get("domain") == 1.0 and same_locality is False:
         signals["location_conflict"] = 1.0
+        # A shared mailbox at the shared domain is the same fact twice.
+        # `info@chain.com` is on every branch listing for the same reason the
+        # website is, so counting it as a second, independent agreement
+        # re-adds exactly the evidence `location_conflict` exists to discount.
+        #
+        # Found by scripts/bench_resolution.py, which merged 112 of 112 branch
+        # pairs. The weights were calibrated against the one branch pair in the
+        # fixtures, and that pair happens to list per-branch emails
+        # (dispatch@ and seattle@), so this term was never exercised: 0.55
+        # domain + 0.30 name - 0.38 conflict = 0.47, review. Add a shared
+        # 0.20 email and it is 0.67 -- a silent merge of a whole chain.
+        if signals.get("email") == 1.0 and _email_domain(left.contact.email) == left_dom:
+            del signals["email"]
 
     score = sum(FIELD_WEIGHTS[k] * v for k, v in signals.items())
     return Candidate(
@@ -218,7 +238,10 @@ def generate_candidates(records: list[CompanyRecord]) -> list[Candidate]:
         for i in range(len(bucket)):
             for j in range(i + 1, len(bucket)):
                 a, b = bucket[i], bucket[j]
-                pair = tuple(sorted((a.record_id, b.record_id)))
+                # Sorted so the pair is the same key whichever order the two
+                # records turn up in -- they block on several keys each.
+                first, second = sorted((a.record_id, b.record_id))
+                pair = (first, second)
                 if pair in compared:
                     continue
                 compared.add(pair)
@@ -248,20 +271,30 @@ class UnionFind:
 
 
 def resolve(
-    records: list[CompanyRecord], accepted: list[Candidate] | None = None
+    records: list[CompanyRecord],
+    accepted: list[Candidate] | None = None,
+    candidates: list[Candidate] | None = None,
 ) -> tuple[dict[str, str], dict[str, str]]:
     """Cluster records.
 
     Returns (record_id -> cluster_id, record_id -> canonical record_id).
     `accepted` lets an adjudicator promote borderline pairs to matches before
     clustering, without changing the scoring rules.
+
+    `candidates` is the output of `generate_candidates(records)` when the
+    caller already has it. Both callers do -- they need the borderline pairs to
+    hand the adjudicator before clustering -- and without this they paid for
+    the whole candidate set twice. On 100k records that was 55s of scoring
+    repeated for nothing, which is most of the stage's wall clock. Omitting it
+    still works and still computes them.
     """
     by_id = {r.record_id: r for r in records}
     union = UnionFind()
     for record in records:
         union.find(record.record_id)
 
-    matches = [c for c in generate_candidates(records) if c.is_match]
+    pool = candidates if candidates is not None else generate_candidates(records)
+    matches = [c for c in pool if c.is_match]
     matches.extend(accepted or [])
     for candidate in matches:
         union.union(candidate.left.record_id, candidate.right.record_id)

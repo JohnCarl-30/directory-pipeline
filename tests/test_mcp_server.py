@@ -73,8 +73,9 @@ async def call(server: Any, tool: str, args: dict[str, Any]) -> dict[str, Any]:
     payload = result[1] if isinstance(result, tuple) else result
     if isinstance(payload, dict):
         return payload
-    text = payload.content[0].text  # type: ignore[union-attr]
-    return json.loads(text)
+    text = payload.content[0].text
+    parsed: dict[str, Any] = json.loads(text)
+    return parsed
 
 
 @pytest.fixture
@@ -241,7 +242,7 @@ def test_the_server_speaks_stdio_without_corrupting_the_stream():
             line = proc.stdout.readline()
             assert line, "server closed the stream before answering"
             # Every line on stdout must be JSON-RPC. This is the assertion.
-            msg = json.loads(line)
+            msg: dict[str, Any] = json.loads(line)
             if msg.get("id") == want:
                 return msg
 

@@ -20,7 +20,8 @@ from prometheus_client import CONTENT_TYPE_LATEST, CollectorRegistry, generate_l
 from prometheus_client.core import CounterMetricFamily, HistogramMetricFamily
 from prometheus_client.registry import Collector
 
-from .observability import METRICS, get_logger
+from .observability import METRICS as METRICS
+from .observability import get_logger
 
 log = get_logger(__name__)
 
