@@ -65,9 +65,12 @@ if ! docker compose up -d --build $SERVICES 2>&1 | tee "$UP_LOG"; then
   # every diagnostic below is empty, which is its own confusing signal.
   if grep -qiE 'toomanyrequests|rate limit' "$UP_LOG"; then
     fail "registry rate limit -- no image was pulled, the stack is not at fault"
-    echo "  Docker Hub limits unauthenticated pulls per IP per 6h, and CI runners" >&2
-    echo "  share IPs. Set DOCKERHUB_USERNAME/DOCKERHUB_TOKEN (repo secrets in CI," >&2
-    echo "  or 'docker login' locally). Re-running will not clear it." >&2
+    # stdout, like fail(), so the explanation stays under the headline it
+    # explains. On stderr the two streams buffer separately and CI interleaved
+    # them backwards -- the advice printed above the failure it was advising on.
+    echo "  Docker Hub limits unauthenticated pulls per IP per 6h, and CI runners"
+    echo "  share IPs. Set DOCKERHUB_USERNAME/DOCKERHUB_TOKEN (repo secrets in CI,"
+    echo "  or 'docker login' locally). Re-running will not clear it."
   else
     fail "compose up failed"
   fi
