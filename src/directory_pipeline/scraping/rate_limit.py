@@ -8,6 +8,10 @@ the long-run average the upstream actually cares about.
 `retry_after` lets a 429 handler push the whole host into a cooldown, so one
 coroutine seeing a 429 slows all of its siblings instead of each discovering the
 limit independently.
+
+`constrain` is the other direction a limit can arrive from: a host that states
+a `Crawl-delay` in robots.txt has told us its rate directly, rather than making
+us infer it from 429s. That path only ever lowers the rate -- see the method.
 """
 
 from __future__ import annotations
@@ -15,6 +19,10 @@ from __future__ import annotations
 import asyncio
 import time
 from dataclasses import dataclass, field
+
+from ..observability import get_logger
+
+log = get_logger(__name__)
 
 
 @dataclass
@@ -57,6 +65,26 @@ class TokenBucket:
             self._cooldown_until = max(self._cooldown_until, time.monotonic() + seconds)
             self._tokens = 0.0
 
+    async def constrain(self, rate: float) -> bool:
+        """Lower the steady-state rate to `rate`. Never raises it.
+
+        One-directional on purpose. This is how a `Crawl-delay` from robots.txt
+        reaches the bucket, and a host asking to be crawled slowly is not
+        offering permission to crawl a different host quickly -- so the
+        configured rate stays the ceiling and this only moves the floor down.
+
+        Burst drops with it: a bucket holding 10 tokens at 0.1 rps would let a
+        batch fire ten immediate requests at a host that asked for one every ten
+        seconds, which honors the average and violates the request.
+        """
+        if rate <= 0 or rate >= self.rate:
+            return False
+        async with self._lock:
+            self.rate = rate
+            self.burst = min(self.burst, 1.0)
+            self._tokens = min(self._tokens, self.burst)
+            return True
+
 
 class HostRateLimiter:
     """Lazily creates one bucket per host."""
@@ -65,6 +93,7 @@ class HostRateLimiter:
         self.rate = rate
         self.burst = burst
         self._buckets: dict[str, TokenBucket] = {}
+        self._caps: dict[str, float] = {}
         self._guard = asyncio.Lock()
 
     async def bucket(self, host: str) -> TokenBucket:
@@ -79,3 +108,19 @@ class HostRateLimiter:
 
     async def penalize(self, host: str, seconds: float) -> None:
         await (await self.bucket(host)).penalize(seconds)
+
+    async def constrain(self, host: str, rate: float) -> None:
+        """Cap one host's rate, e.g. from its `Crawl-delay`.
+
+        The cap is remembered so the common path -- every request after the
+        first -- costs a dict lookup instead of taking the bucket's lock to
+        re-apply a cap that is already in force.
+        """
+        if self._caps.get(host) == rate:
+            return
+        if await (await self.bucket(host)).constrain(rate):
+            self._caps[host] = rate
+            log.info("ratelimit.constrained", host=host, rps=rate)
+
+    def caps(self) -> dict[str, float]:
+        return dict(self._caps)
