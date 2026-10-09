@@ -198,7 +198,7 @@ async def run(args: argparse.Namespace) -> int:
         elif borderline:
             print(f"  {len(borderline)} borderline pair(s) left unmerged (no ANTHROPIC_API_KEY)")
 
-        cluster_of, canonical_of = resolve(records, accepted=accepted)
+        cluster_of, canonical_of = resolve(records, accepted=accepted, candidates=candidates)
         companies = [
             c.model_copy(
                 update={

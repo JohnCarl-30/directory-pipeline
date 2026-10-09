@@ -42,6 +42,7 @@ which is exactly the layer Temporal owns.
 | Data QA | `reporting/qa.py` | Pandas coverage/validity gates that block a release, not just decorate it. |
 | Measured relevance | `api/static/index.html` | A search console that renders the facet aggregations the engine ranked with, and the BM25 scoring tree behind any hit — so relevance is inspectable rather than argued about. |
 | MCP integration | `mcp/server.py` | The directory exposed as MCP tools, reusing `SearchClient` so ranking cannot drift from `/search`. Results trimmed by default, because a tool result is spent from the client's context. |
+| Resolution at scale | `scripts/bench_resolution.py` | 100k records, known answers: 1,319x fewer comparisons than brute force, 99.86% blocking recall, 100% precision. Found two bugs, including one that merged every branch of every chain. |
 | Extraction accuracy | `scripts/eval_extraction.py` | Per-layer, per-field precision and recall against the fixtures the pages are rendered from. The cascade is a measurement, not a claim. |
 
 ---
@@ -84,6 +85,7 @@ make test        # 226 tests (~6s; 10 skip themselves without a cluster)
 make check       # lint + mypy --strict + tests, which is CI's first job
 
 python scripts/eval_extraction.py    # extraction accuracy, per layer and field
+python scripts/bench_resolution.py   # entity resolution over 100k records (~55s)
 ```
 
 `make types` runs mypy alone, `make cov` adds the coverage floor, and
@@ -269,6 +271,26 @@ in what agreement tells you. Two signals are worth calling out:
 Duplicates are indexed with `duplicate_of` set rather than deleted: dropping
 them loses the provenance that proves the merge was right. Search filters them
 out with `is_canonical`.
+
+Measured at 100k records against a corpus with known answers, the design
+claims hold and two bugs did not — see [`docs/benchmarks.md`](docs/benchmarks.md):
+
+```
+  brute force n(n-1)/2            5,000,150,001
+  pairs offered by blocking           3,792,285     1,319x reduction
+  blocking recall (the ceiling)           99.86%
+  recall / precision              97.70% / 100.00%
+  branches wrongly merged              0 of 5,237   (112 of 112 before the fix)
+```
+
+The branch case is the one worth reading. `location_conflict` was calibrated
+against the single branch pair in the fixtures, which lists *per-branch* emails
+— so the email term contributed nothing and the pair scored into review exactly
+as intended. A chain publishing one `info@` on every listing added 0.20 for a
+fact the shared domain had already asserted, cleared the match threshold at 0.67,
+and collapsed every branch into one record. The fix is not a bigger penalty: a
+mailbox at the shared domain is the same fact twice, and is no longer counted
+as independent agreement when the localities disagree.
 
 ### Zero-downtime reindex
 

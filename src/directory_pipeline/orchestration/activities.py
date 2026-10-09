@@ -187,16 +187,21 @@ class PipelineActivities:
         records = [c.company for c in companies]
         activity.heartbeat({"stage": "resolve", "count": len(records)})
 
+        from ..resolution.entity import generate_candidates
+
+        # Scored once and handed to `resolve`. It recomputes the set otherwise,
+        # which on 100k records is a minute of scoring 3.8M pairs a second
+        # time -- see scripts/bench_resolution.py.
+        candidates = generate_candidates(records)
+
         accepted: list[Candidate] = []
         if adjudicate and self.adjudicator.enabled:
-            from ..resolution.entity import generate_candidates
-
-            borderline = [c for c in generate_candidates(records) if c.needs_review]
+            borderline = [c for c in candidates if c.needs_review]
             if borderline:
                 log.info("activity.adjudicating", pairs=len(borderline))
                 accepted = await self.adjudicator.adjudicate_many(borderline)
 
-        cluster_of, canonical_of = resolve(records, accepted=accepted)
+        cluster_of, canonical_of = resolve(records, accepted=accepted, candidates=candidates)
 
         out: list[EnrichedCompany] = []
         collapsed = 0
