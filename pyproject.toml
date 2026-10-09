@@ -11,7 +11,12 @@ dependencies = [
     "pydantic>=2.9",
     "pydantic-settings>=2.6",
     "opensearch-py[async]>=2.7",
-    "selectolax>=0.3.21",
+    # <1 is a hard incompatibility, not caution: selectolax 1.0 removed the
+    # Modest backend, and `extraction/cascade.py` imports
+    # `selectolax.parser.HTMLParser` from it. Moving to the lexbor backend is
+    # the real fix and belongs in its own change, with
+    # scripts/eval_extraction.py re-run to show the selectors still agree.
+    "selectolax>=0.3.21,<1",
     "structlog>=24.4",
     "pandas>=2.2",
     "tenacity>=9.0",

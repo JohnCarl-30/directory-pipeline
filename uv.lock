@@ -589,7 +589,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0" },
     { name = "respx", marker = "extra == 'dev'", specifier = ">=0.21" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.7" },
-    { name = "selectolax", specifier = ">=0.3.21" },
+    { name = "selectolax", specifier = ">=0.3.21,<1" },
     { name = "structlog", specifier = ">=24.4" },
     { name = "temporalio", specifier = ">=1.32,<2" },
     { name = "tenacity", specifier = ">=9.0" },
