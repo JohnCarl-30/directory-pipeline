@@ -74,7 +74,7 @@ class FakeActivities:
 
     @activity.defn(name="fetch_and_extract")
     async def fetch_and_extract(
-        self, urls: list[str], source: str, seen_hashes: dict[str, str] | None = None
+        self, urls: list[str], source: str, force_refetch: bool = False
     ) -> list[CompanyRecord]:
         self.attempts += 1
         if self.poison_url and any(self.poison_url in u for u in urls):
@@ -257,7 +257,7 @@ async def test_enrich_false_skips_the_enrichment_activity(env):
 async def test_empty_batch_short_circuits(env):
     class NoRecords(FakeActivities):
         @activity.defn(name="fetch_and_extract")
-        async def fetch_and_extract(self, urls, source, seen_hashes=None):
+        async def fetch_and_extract(self, urls, source, force_refetch=False):
             return []
 
         @activity.defn(name="index_documents")
@@ -348,7 +348,7 @@ async def test_batch_workflow_exposes_its_stage_via_query(env):
     ):
         handle = await client.start_workflow(
             ProcessBatchWorkflow.run,
-            args=[["http://test/company/a"], "test", True, "companies", {}],
+            args=[["http://test/company/a"], "test", True, "companies", False],
             id=f"batch-{uuid.uuid4()}",
             task_queue=TASK_QUEUE,
         )

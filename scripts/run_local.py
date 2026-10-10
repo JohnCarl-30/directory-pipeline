@@ -162,6 +162,20 @@ async def run(args: argparse.Namespace) -> int:
             print("no records extracted")
             return 1
 
+        # 2b. incremental re-crawl ------------------------------------------
+        banner("2b. Re-crawl, incrementally")
+        known = {r.source_id: r.content_hash for r in records}
+        again = [
+            listing
+            async for listing in crawler.fetch_details(urls, "demo-directory", seen_hashes=known)
+        ]
+        print(f"  known content hashes  {len(known)}")
+        print(f"  pages re-extracted    {len(again)} of {len(urls)}")
+        print("  extraction is where the model cost lives, so a page whose body is")
+        print("  byte-identical is dropped before it gets there. In the pipeline proper")
+        print("  these hashes are read back from the index by the fetch activity; here")
+        print("  they are the ones just extracted, so the whole batch is skipped.")
+
         # 3. enrich ---------------------------------------------------------
         banner("3. Enrich")
         enrichments = await enricher.enrich_many(records)
