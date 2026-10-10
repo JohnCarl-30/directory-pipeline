@@ -301,3 +301,50 @@ async def test_reindex_from_a_missing_alias_bootstraps_instead_of_failing(index)
         assert await idx.resolve_alias(fresh) == result["target_index"]
     finally:
         await idx.client.indices.delete(index=f"{fresh}-*", ignore_unavailable=True)
+
+
+async def test_content_hashes_round_trip_through_a_real_index(index):
+    """The incremental-crawl lookup, against a cluster that really stored it.
+
+    A unit test with a fake client cannot catch the two things that actually
+    break this: `dynamic: strict` rejecting an unmapped `content_hash`, and
+    `index: False` making the value unreadable. Both are server-side.
+    """
+    idx, _settings, alias = index
+
+    docs = [
+        company(
+            "Northwind Analytics",
+            sid="nw",
+            city="Austin",
+            region="TX",
+            website="https://northwind.test",
+        ),
+        company(
+            "Harbor Point Labs",
+            sid="hp",
+            city="Boston",
+            region="MA",
+            website="https://harborpoint.test",
+        ),
+    ]
+    docs[0].company.content_hash = "hash-nw"
+    docs[1].company.content_hash = "hash-hp"
+    await _seed(idx, alias, docs)
+
+    hashes = await idx.content_hashes("itest", ["nw", "hp", "absent"], alias=alias)
+
+    assert hashes == {"nw": "hash-nw", "hp": "hash-hp"}, "index: False must still be readable"
+
+
+async def test_a_record_written_without_a_hash_is_not_reported(index):
+    """Pre-upgrade records carry "". They have to come back as refetch-me."""
+    idx, _settings, alias = index
+
+    doc = company(
+        "Atlas Robotics", sid="at", city="Seattle", region="WA", website="https://atlas.test"
+    )
+    assert doc.company.content_hash == ""
+    await _seed(idx, alias, [doc])
+
+    assert await idx.content_hashes("itest", ["at"], alias=alias) == {}

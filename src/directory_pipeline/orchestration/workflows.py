@@ -82,12 +82,16 @@ class ProcessBatchWorkflow:
         source: str,
         enrich: bool,
         alias: str | None,
-        seen_hashes: dict[str, str] | None = None,
+        force_refetch: bool = False,
     ) -> dict[str, int]:
         self._stage = "fetching"
+        # A bool, not the hash map it replaced. The activity loads the hashes
+        # for its own 25 URLs; a map for a 50,000-company crawl passed through
+        # here would live in this workflow's history and be replayed on every
+        # task, which is the one place a large payload is permanent.
         records: list[CompanyRecord] = await workflow.execute_activity(
             "fetch_and_extract",
-            args=[urls, source, seen_hashes or {}],
+            args=[urls, source, force_refetch],
             result_type=list[CompanyRecord],
             retry_policy=SCRAPE_RETRY,
             **FETCH_TIMEOUTS,
@@ -222,7 +226,7 @@ class CrawlDirectoryWorkflow:
             handles.append(
                 await workflow.start_child_workflow(
                     ProcessBatchWorkflow.run,
-                    args=[batch, request.source, request.enrich, alias, {}],
+                    args=[batch, request.source, request.enrich, alias, request.force_refetch],
                     id=f"{info.workflow_id}-batch-{position}",
                     task_queue=info.task_queue,
                     retry_policy=RetryPolicy(
