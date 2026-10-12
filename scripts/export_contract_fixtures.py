@@ -259,6 +259,26 @@ MINIMAL: list[tuple[str, str, dict[str, Any], list[str]]] = [
         {**REQUIRED_RECORD, "name": "  Northwind  "},
         ["first_seen_at", "last_seen_at"],
     ),
+    # Python's str.strip() and JavaScript's trim() disagree on six characters:
+    # only Python strips \x1c-\x1f and \x85, only JavaScript strips U+FEFF.
+    (
+        "CompanyRecord",
+        "name_python_only_whitespace",
+        {**REQUIRED_RECORD, "name": "\x85\x1cNorthwind\x1d\x1e\x1f"},
+        ["first_seen_at", "last_seen_at"],
+    ),
+    (
+        "CompanyRecord",
+        "name_leading_bom_kept",
+        {**REQUIRED_RECORD, "name": "﻿Northwind"},
+        ["first_seen_at", "last_seen_at"],
+    ),
+    (
+        "CompanyRecord",
+        "name_only_bom_is_not_blank",
+        {**REQUIRED_RECORD, "name": "﻿"},
+        ["first_seen_at", "last_seen_at"],
+    ),
     ("Enrichment", "required_only", {"provider": "mock-enrichment"}, ["fetched_at"]),
     (
         "EnrichedCompany",

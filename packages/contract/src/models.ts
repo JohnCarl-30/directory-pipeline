@@ -31,6 +31,17 @@ const nullableString = () => z.string().nullable().default(null);
 const nullableInt = () => z.number().int().nullable().default(null);
 const stringList = () => z.array(z.string()).default(() => []);
 
+/**
+ * Python's `str.strip()`. JavaScript's `trim()` strips a different set: it
+ * leaves \x1c-\x1f and \x85 (NEL), which Python strips, and strips U+FEFF
+ * (BOM), which Python keeps. A scraped name starting with a BOM would then be
+ * rewritten, or rejected as blank, on its way through TypeScript.
+ */
+const PY_WHITESPACE =
+  "[\\t\\n\\x0b\\x0c\\r\\x1c-\\x1f \\x85\\xa0\\u1680\\u2000-\\u200a\\u2028\\u2029\\u202f\\u205f\\u3000]";
+const PY_STRIP = new RegExp(`^${PY_WHITESPACE}+|${PY_WHITESPACE}+$`, "gu");
+export const pyStrip = (value: string): string => value.replace(PY_STRIP, "");
+
 /** How a record's fields were obtained, cheapest and most reliable first. */
 export const ExtractionMethod = z.enum(["dom", "text", "llm", "llm_repaired"]);
 export type ExtractionMethod = z.output<typeof ExtractionMethod>;
@@ -69,7 +80,10 @@ export const CompanyRecord = z.strictObject({
   source: z.string(),
   source_id: z.string(),
   source_url: z.string(),
-  name: z.string().trim().min(1, "company name is required"),
+  name: z
+    .string()
+    .transform(pyStrip)
+    .pipe(z.string().min(1, "company name is required")),
   legal_name: nullableString(),
   name_normalized: z.string().default(""),
   categories: stringList(),
