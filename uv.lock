@@ -543,7 +543,6 @@ dependencies = [
     { name = "httpx" },
     { name = "mcp" },
     { name = "opensearch-py", extra = ["async"] },
-    { name = "pandas" },
     { name = "prometheus-client" },
     { name = "pydantic" },
     { name = "pydantic-settings" },
@@ -567,6 +566,9 @@ dev = [
     { name = "respx" },
     { name = "ruff" },
 ]
+reports = [
+    { name = "pandas" },
+]
 
 [package.metadata]
 requires-dist = [
@@ -576,7 +578,7 @@ requires-dist = [
     { name = "mcp", specifier = ">=1.2" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.13" },
     { name = "opensearch-py", extras = ["async"], specifier = ">=2.7" },
-    { name = "pandas", specifier = ">=2.2" },
+    { name = "pandas", marker = "extra == 'reports'", specifier = ">=2.2" },
     { name = "pandas-stubs", marker = "extra == 'dev'", specifier = ">=2.2" },
     { name = "pip-audit", marker = "extra == 'dev'", specifier = ">=2.7" },
     { name = "prometheus-client", specifier = ">=0.21" },
@@ -595,7 +597,7 @@ requires-dist = [
     { name = "tenacity", specifier = ">=9.0" },
     { name = "uvicorn", extras = ["standard"], specifier = ">=0.32" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["reports", "dev"]
 
 [[package]]
 name = "docstring-parser"
