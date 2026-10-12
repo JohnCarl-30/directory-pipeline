@@ -92,6 +92,18 @@ python scripts/bench_resolution.py   # entity resolution over 100k records (~55s
 `make types` runs mypy alone, `make cov` adds the coverage floor, and
 `make audit` checks the locked dependencies against the advisory feed.
 
+### TypeScript (migration in progress)
+
+The pipeline is moving to TypeScript one service at a time. Step 0 is
+`packages/contract`: Zod schemas and helpers that mirror `domain/models.py`,
+checked in CI against JSON the Python models write. `make install` needs
+Node 22 and pnpm as well as uv.
+
+```bash
+pnpm check                                   # lint, tsc, vitest
+python scripts/export_contract_fixtures.py   # after changing domain/models.py
+```
+
 ### Full stack
 
 ```bash

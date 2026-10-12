@@ -6,8 +6,9 @@ help: ## Show this help
 	@grep -hE '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | \
 	  awk 'BEGIN{FS=":.*?## "}{printf "  \033[36m%-16s\033[0m %s\n",$$1,$$2}'
 
-install: ## Create the venv from uv.lock (same resolution as CI)
+install: ## Create the venv from uv.lock and node_modules from pnpm-lock.yaml
 	uv sync --frozen --all-extras
+	pnpm install --frozen-lockfile
 
 demo: ## Run the full pipeline locally (no Docker, no credentials)
 	$(PY) scripts/run_local.py
@@ -28,7 +29,11 @@ types: ## Type check (strict over src, relaxed signatures in tests)
 audit: ## Check the locked dependencies for known vulnerabilities
 	$(VENV)/bin/pip-audit --skip-editable --progress-spinner=off
 
-check: lint types test ## Everything CI's first job runs
+check: lint types test ts-check ## Everything CI's test and typescript jobs run
+
+ts-check: ## TypeScript lint, types and tests, then Pydantic over the TypeScript output
+	pnpm check
+	CONTRACT_REQUIRE_FROM_TS=1 $(PY) -m pytest -q tests/test_contract_fixtures.py
 
 fmt: ## Auto-format
 	$(VENV)/bin/ruff format src tests scripts
@@ -78,5 +83,5 @@ worker: ## Run a worker against localhost Temporal
 api: ## Run the API locally
 	$(PY) -m directory_pipeline.api.main
 
-.PHONY: help install demo test cov lint types audit check fmt up observe dashboards down clean logs \
+.PHONY: help install demo test cov lint types audit check ts-check fmt up observe dashboards down clean logs \
         crawl search reindex worker api
