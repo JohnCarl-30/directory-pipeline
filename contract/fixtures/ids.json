@@ -1,0 +1,80 @@
+{
+  "record_ids": [
+    {
+      "source": "demo-directory",
+      "source_id": "northwind-analytics",
+      "expected": "1687753f4dbe42838d1134084b8e0b5968397d0a"
+    },
+    {
+      "source": "demo-directory",
+      "source_id": "café-東京",
+      "expected": "ea97e022c8338c14bcd5929bb91ee638143ada81"
+    },
+    {
+      "source": "a:b",
+      "source_id": "c",
+      "expected": "70bce09e827a98fe6acf7c3e9b0bcf136bc382ed"
+    },
+    {
+      "source": "",
+      "source_id": "",
+      "expected": "05a79f06cf3f67f726dae68d18a2290f6c9a50c9"
+    }
+  ],
+  "content_hashes": [
+    {
+      "html": "",
+      "expected": "e3b0c44298fc1c14"
+    },
+    {
+      "html": "<p>hi</p>",
+      "expected": "0a4735281db70022"
+    },
+    {
+      "html": "<html><body>Café 東京 🚀</body></html>",
+      "expected": "a251ab2b266a1a01"
+    },
+    {
+      "html": "line\r\nbreak",
+      "expected": "f6781c34e282ed60"
+    }
+  ],
+  "source_ids": [
+    {
+      "url": "http://localhost:8081/company/northwind-analytics",
+      "expected": "northwind-analytics"
+    },
+    {
+      "url": "http://localhost:8081/company/northwind-analytics/",
+      "expected": "northwind-analytics"
+    },
+    {
+      "url": "http://localhost:8081/company/northwind-analytics?page=2",
+      "expected": "northwind-analytics"
+    },
+    {
+      "url": "http://localhost:8081/company/northwind-analytics///",
+      "expected": "northwind-analytics"
+    },
+    {
+      "url": "http://localhost:8081/company/a?next=/b/c",
+      "expected": "a"
+    },
+    {
+      "url": "http://localhost:8081/company/a#reviews",
+      "expected": "a#reviews"
+    },
+    {
+      "url": "northwind",
+      "expected": "northwind"
+    },
+    {
+      "url": "/",
+      "expected": ""
+    },
+    {
+      "url": "",
+      "expected": ""
+    }
+  ]
+}

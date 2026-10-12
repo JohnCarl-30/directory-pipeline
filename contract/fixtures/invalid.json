@@ -1,0 +1,91 @@
+{
+  "cases": [
+    {
+      "model": "CompanyRecord",
+      "case": "blank_name",
+      "data": {
+        "record_id": "1687753f4dbe42838d1134084b8e0b5968397d0a",
+        "source": "demo-directory",
+        "source_id": "northwind-analytics",
+        "source_url": "http://localhost:8081/company/northwind-analytics",
+        "name": "   "
+      }
+    },
+    {
+      "model": "CompanyRecord",
+      "case": "missing_name",
+      "data": {
+        "record_id": "1687753f4dbe42838d1134084b8e0b5968397d0a",
+        "source": "demo-directory",
+        "source_id": "northwind-analytics",
+        "source_url": "http://localhost:8081/company/northwind-analytics"
+      }
+    },
+    {
+      "model": "CompanyRecord",
+      "case": "unknown_field",
+      "data": {
+        "record_id": "1687753f4dbe42838d1134084b8e0b5968397d0a",
+        "source": "demo-directory",
+        "source_id": "northwind-analytics",
+        "source_url": "http://localhost:8081/company/northwind-analytics",
+        "name": "Northwind Analytics, Inc.",
+        "nickname": "NW"
+      }
+    },
+    {
+      "model": "CompanyRecord",
+      "case": "unknown_extraction_method",
+      "data": {
+        "record_id": "1687753f4dbe42838d1134084b8e0b5968397d0a",
+        "source": "demo-directory",
+        "source_id": "northwind-analytics",
+        "source_url": "http://localhost:8081/company/northwind-analytics",
+        "name": "Northwind Analytics, Inc.",
+        "extraction_method": "regex"
+      }
+    },
+    {
+      "model": "Address",
+      "case": "unknown_field",
+      "data": {
+        "zip": "78701"
+      }
+    },
+    {
+      "model": "CrawlRequest",
+      "case": "fractional_max_pages",
+      "data": {
+        "max_pages": 2.5
+      }
+    },
+    {
+      "model": "ReindexResult",
+      "case": "missing_nullable_source_index",
+      "data": {
+        "alias": "a",
+        "target_index": "t",
+        "documents_copied": 0,
+        "swapped": false
+      }
+    },
+    {
+      "model": "EnrichedCompany",
+      "case": "null_company",
+      "data": {
+        "company": null
+      }
+    },
+    {
+      "model": "RawListing",
+      "case": "malformed_fetched_at",
+      "data": {
+        "source": "s",
+        "source_id": "i",
+        "url": "u",
+        "html": "",
+        "fetched_at": "yesterday"
+      }
+    }
+  ]
+}

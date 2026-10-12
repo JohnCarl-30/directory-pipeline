@@ -1,0 +1,410 @@
+{
+  "cases": [
+    {
+      "case": "full",
+      "input": {
+        "company": {
+          "record_id": "1687753f4dbe42838d1134084b8e0b5968397d0a",
+          "source": "demo-directory",
+          "source_id": "northwind-analytics",
+          "source_url": "http://localhost:8081/company/northwind-analytics",
+          "name": "Northwind Analytics, Inc.",
+          "legal_name": "Northwind Analytics Incorporated",
+          "name_normalized": "northwind analytics",
+          "categories": [
+            "software",
+            "analytics"
+          ],
+          "description": "Real-time customer data platforms for mid-market retailers.",
+          "address": {
+            "line1": "412 Congress Ave",
+            "line2": "Suite 800",
+            "city": "Austin",
+            "region": "TX",
+            "postal_code": "78701",
+            "country": "US"
+          },
+          "contact": {
+            "phone_e164": "+15125550100",
+            "phone_raw": "(512) 555-0100",
+            "email": "hello@northwind.example",
+            "website": "https://northwind.example"
+          },
+          "employee_count": 138,
+          "founded_year": 2014,
+          "extraction_method": "text",
+          "extraction_confidence": 0.9,
+          "content_hash": "5d41402abc4b2a76",
+          "first_seen_at": "2026-10-12T23:10:24.954613Z",
+          "last_seen_at": "2026-03-09T08:00:00.000005+08:00"
+        },
+        "enrichment": {
+          "provider": "mock-enrichment",
+          "provider_company_id": "nw-001",
+          "industry": "Software",
+          "naics": "511210",
+          "revenue_usd": 24000000,
+          "employee_count": 140,
+          "linkedin_url": "https://linkedin.example/company/northwind",
+          "technologies": [
+            "python",
+            "opensearch"
+          ],
+          "confidence": 0.87655,
+          "fetched_at": "2026-10-12T23:10:24.954613Z",
+          "cache_hit": true
+        },
+        "cluster_id": "c-northwind",
+        "duplicate_of": null,
+        "schema_version": 4
+      },
+      "document": {
+        "record_id": "1687753f4dbe42838d1134084b8e0b5968397d0a",
+        "schema_version": 4,
+        "source": "demo-directory",
+        "source_id": "northwind-analytics",
+        "source_url": "http://localhost:8081/company/northwind-analytics",
+        "content_hash": "5d41402abc4b2a76",
+        "name": "Northwind Analytics, Inc.",
+        "name_normalized": "northwind analytics",
+        "legal_name": "Northwind Analytics Incorporated",
+        "categories": [
+          "software",
+          "analytics"
+        ],
+        "description": "Real-time customer data platforms for mid-market retailers.",
+        "address": {
+          "line1": "412 Congress Ave",
+          "city": "Austin",
+          "region": "TX",
+          "postal_code": "78701",
+          "country": "US",
+          "full": "412 Congress Ave, Suite 800, Austin, TX, 78701"
+        },
+        "contact": {
+          "phone_e164": "+15125550100",
+          "email": "hello@northwind.example",
+          "website": "https://northwind.example"
+        },
+        "employee_count": 140,
+        "founded_year": 2014,
+        "cluster_id": "c-northwind",
+        "duplicate_of": null,
+        "is_canonical": true,
+        "extraction": {
+          "method": "text",
+          "confidence": 0.9
+        },
+        "first_seen_at": "2026-10-12T23:10:24.954613+00:00",
+        "last_seen_at": "2026-03-09T08:00:00.000005+08:00",
+        "enrichment": {
+          "provider": "mock-enrichment",
+          "industry": "Software",
+          "naics": "511210",
+          "revenue_usd": 24000000,
+          "linkedin_url": "https://linkedin.example/company/northwind",
+          "technologies": [
+            "python",
+            "opensearch"
+          ],
+          "confidence": 0.8766,
+          "fetched_at": "2026-10-12T23:10:24.954613+00:00"
+        },
+        "completeness": 1.0
+      }
+    },
+    {
+      "case": "duplicate_without_enrichment",
+      "input": {
+        "company": {
+          "record_id": "a18727b8fa558d9b1a1127b9d4d45fe14983bcff",
+          "source": "demo-directory",
+          "source_id": "cafe-zurich",
+          "source_url": "http://localhost:8081/company/cafe-zurich",
+          "name": "Café Zürich — 東京",
+          "legal_name": null,
+          "name_normalized": "",
+          "categories": [],
+          "description": null,
+          "address": {
+            "line1": null,
+            "line2": null,
+            "city": null,
+            "region": null,
+            "postal_code": null,
+            "country": "US"
+          },
+          "contact": {
+            "phone_e164": null,
+            "phone_raw": null,
+            "email": null,
+            "website": null
+          },
+          "employee_count": null,
+          "founded_year": null,
+          "extraction_method": "llm_repaired",
+          "extraction_confidence": 0.123456789,
+          "content_hash": "",
+          "first_seen_at": "2026-01-01T00:00:00Z",
+          "last_seen_at": "2026-01-01T00:00:00Z"
+        },
+        "enrichment": null,
+        "cluster_id": "c-northwind",
+        "duplicate_of": "1687753f4dbe42838d1134084b8e0b5968397d0a",
+        "schema_version": 4
+      },
+      "document": {
+        "record_id": "a18727b8fa558d9b1a1127b9d4d45fe14983bcff",
+        "schema_version": 4,
+        "source": "demo-directory",
+        "source_id": "cafe-zurich",
+        "source_url": "http://localhost:8081/company/cafe-zurich",
+        "content_hash": "",
+        "name": "Café Zürich — 東京",
+        "name_normalized": "",
+        "legal_name": null,
+        "categories": [],
+        "description": null,
+        "address": {
+          "line1": null,
+          "city": null,
+          "region": null,
+          "postal_code": null,
+          "country": "US",
+          "full": ""
+        },
+        "contact": {
+          "phone_e164": null,
+          "email": null,
+          "website": null
+        },
+        "employee_count": null,
+        "founded_year": null,
+        "cluster_id": "c-northwind",
+        "duplicate_of": "1687753f4dbe42838d1134084b8e0b5968397d0a",
+        "is_canonical": false,
+        "extraction": {
+          "method": "llm_repaired",
+          "confidence": 0.1235
+        },
+        "first_seen_at": "2026-01-01T00:00:00+00:00",
+        "last_seen_at": "2026-01-01T00:00:00+00:00",
+        "completeness": 0.0
+      }
+    },
+    {
+      "case": "enrichment_employee_count_zero",
+      "input": {
+        "company": {
+          "record_id": "1687753f4dbe42838d1134084b8e0b5968397d0a",
+          "source": "demo-directory",
+          "source_id": "northwind-analytics",
+          "source_url": "http://localhost:8081/company/northwind-analytics",
+          "name": "Northwind Analytics, Inc.",
+          "legal_name": "Northwind Analytics Incorporated",
+          "name_normalized": "northwind analytics",
+          "categories": [
+            "software",
+            "analytics"
+          ],
+          "description": "Real-time customer data platforms for mid-market retailers.",
+          "address": {
+            "line1": "412 Congress Ave",
+            "line2": "Suite 800",
+            "city": "Austin",
+            "region": "TX",
+            "postal_code": "78701",
+            "country": "US"
+          },
+          "contact": {
+            "phone_e164": "+15125550100",
+            "phone_raw": "(512) 555-0100",
+            "email": "hello@northwind.example",
+            "website": "https://northwind.example"
+          },
+          "employee_count": 138,
+          "founded_year": 2014,
+          "extraction_method": "text",
+          "extraction_confidence": 0.9,
+          "content_hash": "5d41402abc4b2a76",
+          "first_seen_at": "2026-10-12T23:10:24.954613Z",
+          "last_seen_at": "2026-03-09T08:00:00.000005+08:00"
+        },
+        "enrichment": {
+          "provider": "mock-enrichment",
+          "provider_company_id": "nw-001",
+          "industry": "Software",
+          "naics": "511210",
+          "revenue_usd": 24000000,
+          "employee_count": 0,
+          "linkedin_url": "https://linkedin.example/company/northwind",
+          "technologies": [
+            "python",
+            "opensearch"
+          ],
+          "confidence": 0.87655,
+          "fetched_at": "2026-10-12T23:10:24.954613Z",
+          "cache_hit": true
+        },
+        "cluster_id": null,
+        "duplicate_of": null,
+        "schema_version": 4
+      },
+      "document": {
+        "record_id": "1687753f4dbe42838d1134084b8e0b5968397d0a",
+        "schema_version": 4,
+        "source": "demo-directory",
+        "source_id": "northwind-analytics",
+        "source_url": "http://localhost:8081/company/northwind-analytics",
+        "content_hash": "5d41402abc4b2a76",
+        "name": "Northwind Analytics, Inc.",
+        "name_normalized": "northwind analytics",
+        "legal_name": "Northwind Analytics Incorporated",
+        "categories": [
+          "software",
+          "analytics"
+        ],
+        "description": "Real-time customer data platforms for mid-market retailers.",
+        "address": {
+          "line1": "412 Congress Ave",
+          "city": "Austin",
+          "region": "TX",
+          "postal_code": "78701",
+          "country": "US",
+          "full": "412 Congress Ave, Suite 800, Austin, TX, 78701"
+        },
+        "contact": {
+          "phone_e164": "+15125550100",
+          "email": "hello@northwind.example",
+          "website": "https://northwind.example"
+        },
+        "employee_count": 138,
+        "founded_year": 2014,
+        "cluster_id": null,
+        "duplicate_of": null,
+        "is_canonical": true,
+        "extraction": {
+          "method": "text",
+          "confidence": 0.9
+        },
+        "first_seen_at": "2026-10-12T23:10:24.954613+00:00",
+        "last_seen_at": "2026-03-09T08:00:00.000005+08:00",
+        "enrichment": {
+          "provider": "mock-enrichment",
+          "industry": "Software",
+          "naics": "511210",
+          "revenue_usd": 24000000,
+          "linkedin_url": "https://linkedin.example/company/northwind",
+          "technologies": [
+            "python",
+            "opensearch"
+          ],
+          "confidence": 0.8766,
+          "fetched_at": "2026-10-12T23:10:24.954613+00:00"
+        },
+        "completeness": 1.0
+      }
+    },
+    {
+      "case": "no_employee_count_anywhere",
+      "input": {
+        "company": {
+          "record_id": "a18727b8fa558d9b1a1127b9d4d45fe14983bcff",
+          "source": "demo-directory",
+          "source_id": "cafe-zurich",
+          "source_url": "http://localhost:8081/company/cafe-zurich",
+          "name": "Café Zürich — 東京",
+          "legal_name": null,
+          "name_normalized": "",
+          "categories": [],
+          "description": null,
+          "address": {
+            "line1": null,
+            "line2": null,
+            "city": null,
+            "region": null,
+            "postal_code": null,
+            "country": "US"
+          },
+          "contact": {
+            "phone_e164": null,
+            "phone_raw": null,
+            "email": null,
+            "website": null
+          },
+          "employee_count": null,
+          "founded_year": null,
+          "extraction_method": "llm_repaired",
+          "extraction_confidence": 0.123456789,
+          "content_hash": "",
+          "first_seen_at": "2026-01-01T00:00:00Z",
+          "last_seen_at": "2026-01-01T00:00:00Z"
+        },
+        "enrichment": {
+          "provider": "mock-enrichment",
+          "provider_company_id": null,
+          "industry": null,
+          "naics": null,
+          "revenue_usd": null,
+          "employee_count": null,
+          "linkedin_url": null,
+          "technologies": [],
+          "confidence": 0.0,
+          "fetched_at": "2026-01-01T00:00:00Z",
+          "cache_hit": false
+        },
+        "cluster_id": null,
+        "duplicate_of": null,
+        "schema_version": 4
+      },
+      "document": {
+        "record_id": "a18727b8fa558d9b1a1127b9d4d45fe14983bcff",
+        "schema_version": 4,
+        "source": "demo-directory",
+        "source_id": "cafe-zurich",
+        "source_url": "http://localhost:8081/company/cafe-zurich",
+        "content_hash": "",
+        "name": "Café Zürich — 東京",
+        "name_normalized": "",
+        "legal_name": null,
+        "categories": [],
+        "description": null,
+        "address": {
+          "line1": null,
+          "city": null,
+          "region": null,
+          "postal_code": null,
+          "country": "US",
+          "full": ""
+        },
+        "contact": {
+          "phone_e164": null,
+          "email": null,
+          "website": null
+        },
+        "employee_count": null,
+        "founded_year": null,
+        "cluster_id": null,
+        "duplicate_of": null,
+        "is_canonical": true,
+        "extraction": {
+          "method": "llm_repaired",
+          "confidence": 0.1235
+        },
+        "first_seen_at": "2026-01-01T00:00:00+00:00",
+        "last_seen_at": "2026-01-01T00:00:00+00:00",
+        "enrichment": {
+          "provider": "mock-enrichment",
+          "industry": null,
+          "naics": null,
+          "revenue_usd": null,
+          "linkedin_url": null,
+          "technologies": [],
+          "confidence": 0.0,
+          "fetched_at": "2026-01-01T00:00:00+00:00"
+        },
+        "completeness": 0.125
+      }
+    }
+  ]
+}

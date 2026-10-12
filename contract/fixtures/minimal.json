@@ -1,0 +1,293 @@
+{
+  "cases": [
+    {
+      "model": "RawListing",
+      "case": "required_only",
+      "input": {
+        "source": "s",
+        "source_id": "i",
+        "url": "http://x/company/i",
+        "html": "<p>hi</p>"
+      },
+      "expected": {
+        "source": "s",
+        "source_id": "i",
+        "url": "http://x/company/i",
+        "html": "<p>hi</p>",
+        "http_status": 200,
+        "via_proxy": null
+      },
+      "now_fields": [
+        "fetched_at"
+      ]
+    },
+    {
+      "model": "Address",
+      "case": "required_only",
+      "input": {},
+      "expected": {
+        "line1": null,
+        "line2": null,
+        "city": null,
+        "region": null,
+        "postal_code": null,
+        "country": "US"
+      },
+      "now_fields": []
+    },
+    {
+      "model": "Contact",
+      "case": "required_only",
+      "input": {},
+      "expected": {
+        "phone_e164": null,
+        "phone_raw": null,
+        "email": null,
+        "website": null
+      },
+      "now_fields": []
+    },
+    {
+      "model": "CompanyRecord",
+      "case": "required_only",
+      "input": {
+        "record_id": "1687753f4dbe42838d1134084b8e0b5968397d0a",
+        "source": "demo-directory",
+        "source_id": "northwind-analytics",
+        "source_url": "http://localhost:8081/company/northwind-analytics",
+        "name": "Northwind Analytics, Inc."
+      },
+      "expected": {
+        "record_id": "1687753f4dbe42838d1134084b8e0b5968397d0a",
+        "source": "demo-directory",
+        "source_id": "northwind-analytics",
+        "source_url": "http://localhost:8081/company/northwind-analytics",
+        "name": "Northwind Analytics, Inc.",
+        "legal_name": null,
+        "name_normalized": "",
+        "categories": [],
+        "description": null,
+        "address": {
+          "line1": null,
+          "line2": null,
+          "city": null,
+          "region": null,
+          "postal_code": null,
+          "country": "US"
+        },
+        "contact": {
+          "phone_e164": null,
+          "phone_raw": null,
+          "email": null,
+          "website": null
+        },
+        "employee_count": null,
+        "founded_year": null,
+        "extraction_method": "dom",
+        "extraction_confidence": 1.0,
+        "content_hash": ""
+      },
+      "now_fields": [
+        "first_seen_at",
+        "last_seen_at"
+      ]
+    },
+    {
+      "model": "CompanyRecord",
+      "case": "padded_name",
+      "input": {
+        "record_id": "1687753f4dbe42838d1134084b8e0b5968397d0a",
+        "source": "demo-directory",
+        "source_id": "northwind-analytics",
+        "source_url": "http://localhost:8081/company/northwind-analytics",
+        "name": "  Northwind  "
+      },
+      "expected": {
+        "record_id": "1687753f4dbe42838d1134084b8e0b5968397d0a",
+        "source": "demo-directory",
+        "source_id": "northwind-analytics",
+        "source_url": "http://localhost:8081/company/northwind-analytics",
+        "name": "Northwind",
+        "legal_name": null,
+        "name_normalized": "",
+        "categories": [],
+        "description": null,
+        "address": {
+          "line1": null,
+          "line2": null,
+          "city": null,
+          "region": null,
+          "postal_code": null,
+          "country": "US"
+        },
+        "contact": {
+          "phone_e164": null,
+          "phone_raw": null,
+          "email": null,
+          "website": null
+        },
+        "employee_count": null,
+        "founded_year": null,
+        "extraction_method": "dom",
+        "extraction_confidence": 1.0,
+        "content_hash": ""
+      },
+      "now_fields": [
+        "first_seen_at",
+        "last_seen_at"
+      ]
+    },
+    {
+      "model": "Enrichment",
+      "case": "required_only",
+      "input": {
+        "provider": "mock-enrichment"
+      },
+      "expected": {
+        "provider": "mock-enrichment",
+        "provider_company_id": null,
+        "industry": null,
+        "naics": null,
+        "revenue_usd": null,
+        "employee_count": null,
+        "linkedin_url": null,
+        "technologies": [],
+        "confidence": 0.0,
+        "cache_hit": false
+      },
+      "now_fields": [
+        "fetched_at"
+      ]
+    },
+    {
+      "model": "EnrichedCompany",
+      "case": "required_only",
+      "input": {
+        "company": {
+          "record_id": "1687753f4dbe42838d1134084b8e0b5968397d0a",
+          "source": "demo-directory",
+          "source_id": "northwind-analytics",
+          "source_url": "http://localhost:8081/company/northwind-analytics",
+          "name": "Northwind Analytics, Inc."
+        }
+      },
+      "expected": {
+        "company": {
+          "record_id": "1687753f4dbe42838d1134084b8e0b5968397d0a",
+          "source": "demo-directory",
+          "source_id": "northwind-analytics",
+          "source_url": "http://localhost:8081/company/northwind-analytics",
+          "name": "Northwind Analytics, Inc.",
+          "legal_name": null,
+          "name_normalized": "",
+          "categories": [],
+          "description": null,
+          "address": {
+            "line1": null,
+            "line2": null,
+            "city": null,
+            "region": null,
+            "postal_code": null,
+            "country": "US"
+          },
+          "contact": {
+            "phone_e164": null,
+            "phone_raw": null,
+            "email": null,
+            "website": null
+          },
+          "employee_count": null,
+          "founded_year": null,
+          "extraction_method": "dom",
+          "extraction_confidence": 1.0,
+          "content_hash": ""
+        },
+        "enrichment": null,
+        "cluster_id": null,
+        "duplicate_of": null,
+        "schema_version": 4
+      },
+      "now_fields": [
+        "company.first_seen_at",
+        "company.last_seen_at"
+      ]
+    },
+    {
+      "model": "CrawlRequest",
+      "case": "required_only",
+      "input": {},
+      "expected": {
+        "source": "demo-directory",
+        "categories": [
+          "software"
+        ],
+        "max_pages": 5,
+        "batch_size": 25,
+        "enrich": true,
+        "index_alias": null,
+        "force_refetch": false,
+        "pending_urls": [],
+        "carried_totals": {}
+      },
+      "now_fields": []
+    },
+    {
+      "model": "CrawlResult",
+      "case": "required_only",
+      "input": {
+        "run_id": "r"
+      },
+      "expected": {
+        "run_id": "r",
+        "pages_crawled": 0,
+        "listings_found": 0,
+        "records_extracted": 0,
+        "records_enriched": 0,
+        "duplicates_collapsed": 0,
+        "documents_indexed": 0,
+        "failures": [],
+        "index_name": null,
+        "finished_at": null
+      },
+      "now_fields": [
+        "started_at"
+      ]
+    },
+    {
+      "model": "ReindexRequest",
+      "case": "required_only",
+      "input": {
+        "alias": "companies"
+      },
+      "expected": {
+        "alias": "companies",
+        "reason": "mapping change",
+        "target_schema_version": 4,
+        "wait_for_completion": false,
+        "drop_old_index": false
+      },
+      "now_fields": []
+    },
+    {
+      "model": "ReindexResult",
+      "case": "required_only",
+      "input": {
+        "alias": "companies",
+        "source_index": null,
+        "target_index": "t",
+        "documents_copied": 0,
+        "swapped": false
+      },
+      "expected": {
+        "alias": "companies",
+        "source_index": null,
+        "target_index": "t",
+        "documents_copied": 0,
+        "swapped": false,
+        "old_index_dropped": false,
+        "duration_s": 0.0
+      },
+      "now_fields": []
+    }
+  ]
+}
