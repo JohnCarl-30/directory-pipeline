@@ -17,3 +17,7 @@ reports/*.parquet
 
 # macOS
 .DS_Store
+
+# TypeScript
+node_modules/
+contract/fixtures/from-ts/

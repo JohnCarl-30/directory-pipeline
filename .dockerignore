@@ -11,3 +11,4 @@ reports
 tests
 docs
 .env
+node_modules

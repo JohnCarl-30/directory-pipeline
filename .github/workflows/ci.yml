@@ -46,6 +46,47 @@ jobs:
         # Exits non-zero if extraction, enrichment, or resolution breaks.
         run: .venv/bin/python scripts/run_local.py
 
+  typescript:
+    # packages/contract against the Pydantic models, in both directions. The
+    # Python half needs the uv environment, so this job sets up both toolchains.
+    # (The staleness check, committed fixtures vs. a fresh export, runs in the
+    # `test` job as part of the normal pytest run.)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .node-version
+          cache: pnpm
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+
+      - name: Install
+        run: |
+          pnpm install --frozen-lockfile
+          uv sync --frozen --all-extras
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Type check
+        run: pnpm typecheck
+
+      - name: Test
+        run: pnpm test
+
+      - name: TypeScript output validates in Pydantic
+        # Fail, don't skip, if Vitest did not write its output: a skipped check
+        # here would look exactly like a passing one.
+        env:
+          CONTRACT_REQUIRE_FROM_TS: "1"
+        run: .venv/bin/python -m pytest -q tests/test_contract_fixtures.py
+
   audit:
     # Separate job so a new advisory against a transitive dependency reports as
     # its own red X rather than looking like a test failure. It is also the one
