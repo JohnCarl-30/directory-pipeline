@@ -1,0 +1,13 @@
+# Only pyproject.toml, uv.lock, README.md and src/ are copied into the image.
+# Excluding the rest keeps the build context small (.venv alone is ~380MB).
+.git
+.venv
+.mypy_cache
+.pytest_cache
+.ruff_cache
+.coverage
+**/__pycache__
+reports
+tests
+docs
+.env

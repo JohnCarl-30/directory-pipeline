@@ -94,7 +94,7 @@ python scripts/bench_resolution.py   # entity resolution over 100k records (~55s
 ### Full stack
 
 ```bash
-make up          # OpenSearch + Dashboards + Temporal + 2 workers + API
+make up          # OpenSearch + Temporal + 2 workers + API
 make crawl       # POST /ingest/crawl
 make search      # GET /search?q=analytics
 make reindex     # POST /ingest/reindex  (zero-downtime alias swap)
@@ -108,7 +108,7 @@ make down
 | **Search console** | http://localhost:8000/ui |
 | API docs | http://localhost:8000/docs |
 | Temporal UI | http://localhost:8080 |
-| OpenSearch Dashboards | http://localhost:5601 |
+| OpenSearch Dashboards (`make dashboards`) | http://localhost:5601 |
 | Prometheus (`make observe`) | http://localhost:9090 |
 
 ### Enabling the model-backed paths

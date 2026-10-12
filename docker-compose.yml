@@ -1,4 +1,12 @@
 # Full local stack. `make up` brings this online; `make demo` runs without it.
+
+# The API, the workers and both mock upstreams are one image run with four
+# different commands. Every service names the same tag, so Compose builds it
+# once and the four share it, instead of four identical images under four names.
+x-app: &app
+  image: directory-pipeline:local
+  build: { context: ., dockerfile: docker/Dockerfile }
+
 services:
   opensearch:
     image: opensearchproject/opensearch:2.17.1
@@ -22,8 +30,12 @@ services:
       retries: 12
 
   dashboards:
+    # Behind a profile like Prometheus: at 2.4GB it is the largest image in the
+    # stack, and the search console at :8000/ui covers day-to-day use.
+    #   make dashboards
     image: opensearchproject/opensearch-dashboards:2.17.1
     container_name: dp-dashboards
+    profiles: [dashboards]
     environment:
       - OPENSEARCH_HOSTS=["http://opensearch:9200"]
       - DISABLE_SECURITY_DASHBOARDS_PLUGIN=true
@@ -66,19 +78,19 @@ services:
     depends_on: [temporal]
 
   mock-directory:
-    build: { context: ., dockerfile: docker/Dockerfile }
+    <<: *app
     container_name: dp-mock-directory
     command: python -m directory_pipeline.fixtures.mock_directory
     ports: ["8081:8081"]
 
   mock-enrichment:
-    build: { context: ., dockerfile: docker/Dockerfile }
+    <<: *app
     container_name: dp-mock-enrichment
     command: python -m directory_pipeline.fixtures.mock_enrichment
     ports: ["8082:8082"]
 
   worker:
-    build: { context: ., dockerfile: docker/Dockerfile }
+    <<: *app
     # No container_name: this service scales, and a fixed name must be unique.
     command: dp-worker
     environment:
@@ -110,7 +122,7 @@ services:
       replicas: 2
 
   api:
-    build: { context: ., dockerfile: docker/Dockerfile }
+    <<: *app
     container_name: dp-api
     command: dp-api
     environment:

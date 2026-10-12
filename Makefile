@@ -37,16 +37,20 @@ fmt: ## Auto-format
 up: ## Start the full stack (OpenSearch + Temporal + workers + API)
 	docker compose up -d --build
 	@echo "Temporal UI       http://localhost:8080"
-	@echo "OpenSearch Dash   http://localhost:5601"
+	@echo "Search console    http://localhost:8000/ui"
 	@echo "API docs          http://localhost:8000/docs"
+
+dashboards: ## Start OpenSearch Dashboards (optional, 2.4GB image)
+	docker compose --profile dashboards up -d dashboards
+	@echo "OpenSearch Dash   http://localhost:5601"
 
 observe: ## Start Prometheus and scrape the API + every worker replica
 	docker compose --profile observability up -d prometheus
 	@echo "Prometheus        http://localhost:9090"
 	@echo "worker targets    http://localhost:9090/targets"
 
-down: ## Stop the stack
-	docker compose down
+down: ## Stop the stack, including the optional profiles
+	docker compose --profile '*' down
 
 clean: ## Stop the stack and delete volumes
 	docker compose down -v
@@ -74,5 +78,5 @@ worker: ## Run a worker against localhost Temporal
 api: ## Run the API locally
 	$(PY) -m directory_pipeline.api.main
 
-.PHONY: help install demo test cov lint types audit check fmt up observe down clean logs \
+.PHONY: help install demo test cov lint types audit check fmt up observe dashboards down clean logs \
         crawl search reindex worker api
