@@ -33,12 +33,15 @@ from opensearchpy import AsyncOpenSearch, NotFoundError, RequestError
 from opensearchpy.helpers import async_bulk
 
 from ..config import Settings
-from ..domain.models import SCHEMA_VERSION, EnrichedCompany
+from ..domain.models import SCHEMA_VERSION, CompanyRecord, EnrichedCompany
 from ..observability import METRICS, get_logger, timed
 
 log = get_logger(__name__)
 
 INGEST_PIPELINE_ID = "companies-normalize"
+
+# mget ids per request. Keeps one backfill from building a megabyte of JSON.
+_MGET_CHUNK = 1_000
 
 # Custom analyzers. `company_name_analyzer` strips the legal suffixes that make
 # "Acme Inc" and "Acme LLC" look different to BM25 -- the same normalization the
@@ -100,6 +103,11 @@ MAPPINGS: dict[str, Any] = {
         "source": {"type": "keyword"},
         "source_id": {"type": "keyword"},
         "source_url": {"type": "keyword", "index": False},
+        # Hash of the page body this record came from, read back on the
+        # next crawl to skip pages that have not changed. `index: False`
+        # because it is fetched by document id and never searched or
+        # aggregated -- the only access path is mget.
+        "content_hash": {"type": "keyword", "index": False},
         "name": {
             "type": "text",
             "analyzer": "company_name_analyzer",
@@ -335,6 +343,59 @@ class SearchIndex:
                 log.error("index.bulk_error", detail=error)
         METRICS.incr("index.documents", succeeded)
         return int(succeeded)
+
+    async def content_hashes(
+        self, source: str, source_ids: list[str], *, alias: str | None = None
+    ) -> dict[str, str]:
+        """`source_id -> content_hash` for records already indexed.
+
+        This is what makes a re-crawl incremental: a page whose body hash is
+        unchanged is dropped before extraction, which is where the model cost
+        lives.
+
+        Fetched by document id with `mget`, not by query. `record_id` is
+        `sha1(source:source_id)`, so there is exactly one document per pair and
+        the id is computable without asking -- no search, no scoring, no
+        dependence on the `source_id` field being indexed or on the refresh
+        interval having caught up.
+
+        Missing documents and documents with an empty hash are both simply
+        absent from the result, so a first crawl and a crawl after a schema
+        change behave the same way: nothing matches, everything is fetched.
+        """
+        if not source_ids:
+            return {}
+
+        target = alias or self.alias
+        by_record_id = {
+            CompanyRecord.make_record_id(source, source_id): source_id for source_id in source_ids
+        }
+
+        hashes: dict[str, str] = {}
+        ids = list(by_record_id)
+        # Chunked because mget bodies are unbounded by the caller: a batch is
+        # 25 URLs today, and nothing stops a backfill passing 50,000.
+        for start in range(0, len(ids), _MGET_CHUNK):
+            chunk = ids[start : start + _MGET_CHUNK]
+            try:
+                response = await self.client.mget(
+                    body={"ids": chunk},
+                    index=target,
+                    _source=["content_hash"],
+                )
+            except NotFoundError:
+                # No alias yet -- a first run. Not an error, just no history.
+                return {}
+
+            for doc in response.get("docs", []):
+                if not doc.get("found"):
+                    continue
+                digest = (doc.get("_source") or {}).get("content_hash")
+                if digest:
+                    hashes[by_record_id[doc["_id"]]] = digest
+
+        METRICS.incr("index.content_hashes_loaded", len(hashes))
+        return hashes
 
     async def _reindex_via_task(
         self,

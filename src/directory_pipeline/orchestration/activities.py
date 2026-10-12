@@ -36,7 +36,7 @@ from ..observability import configure_logging, get_logger
 from ..resolution.adjudicator import Adjudicator
 from ..resolution.entity import Candidate, resolve
 from ..scraping.client import FetchError, ResilientClient
-from ..scraping.crawler import DirectoryCrawler
+from ..scraping.crawler import DirectoryCrawler, source_id_from_url
 from ..search.index import SearchIndex
 
 log = get_logger(__name__)
@@ -134,18 +134,34 @@ class PipelineActivities:
 
     @activity.defn(name="fetch_and_extract")
     async def fetch_and_extract(
-        self, urls: list[str], source: str, seen_hashes: dict[str, str] | None = None
+        self, urls: list[str], source: str, force_refetch: bool = False
     ) -> list[CompanyRecord]:
         """Fetch a batch of detail pages and extract records from each.
 
         Fetch and extract live in one activity on purpose: passing raw HTML
         between activities would push megabytes of page source through
         Temporal's payload limits and into workflow history forever.
+
+        The known content hashes are loaded **here**, not handed down by the
+        workflow, for the same reason. A crawl of 50,000 companies has 50,000
+        hashes; passing them through workflow arguments would put that map in
+        the workflow's history, where it is replayed forever, and blow the
+        payload limit long before it got there. Each activity looks up only
+        the 25 it is about to fetch.
+
+        `force_refetch` skips the lookup entirely -- the escape hatch for when
+        the extractor changed rather than the page.
         """
         records: list[CompanyRecord] = []
         processed = 0
 
-        pages = self.crawler.fetch_details(urls, source, seen_hashes=seen_hashes or {})
+        seen_hashes: dict[str, str] = {}
+        if not force_refetch:
+            seen_hashes = await self.index.content_hashes(
+                source, [source_id_from_url(url) for url in urls]
+            )
+
+        pages = self.crawler.fetch_details(urls, source, seen_hashes=seen_hashes)
         async for listing in _reraise_fetch_errors(pages):
             processed += 1
             try:
@@ -160,7 +176,13 @@ class PipelineActivities:
             if processed % 5 == 0:
                 activity.heartbeat({"stage": "extract", "processed": processed, "total": len(urls)})
 
-        log.info("activity.extracted", requested=len(urls), extracted=len(records))
+        log.info(
+            "activity.extracted",
+            requested=len(urls),
+            extracted=len(records),
+            known_hashes=len(seen_hashes),
+            skipped_unchanged=len(urls) - processed,
+        )
         return records
 
     # --- enrichment --------------------------------------------------------

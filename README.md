@@ -30,6 +30,7 @@ which is exactly the layer Temporal owns.
 
 | Concern | Where | The decision worth reading |
 |---|---|---|
+| Incremental re-crawl | `search/index.py::content_hashes` | A page whose body hash is unchanged is dropped before extraction, which is where the model cost lives. The hashes are read back by document id, 25 at a time, inside the fetch activity. |
 | Model-assisted extraction | `extraction/cascade.py` | Three layers, cheapest first — selectors, then regex over prose, then the model. Structured outputs make the model's response schema-valid by construction; confidence is capped by the weakest source used. |
 | Tool calling | `resolution/adjudicator.py` | A strict tool schema to adjudicate *only* borderline duplicate pairs, so model cost tracks genuine ambiguity rather than corpus size. |
 | Index design | `search/index.py` | `dynamic: strict` mappings, three analyzers for company names, alias-swap reindex. |
@@ -81,7 +82,7 @@ grow past the limit on a large run.
 ```bash
 make install     # uv sync from uv.lock -- exact pinned versions
 make demo        # full pipeline against in-process mocks
-make test        # 226 tests (~6s; 10 skip themselves without a cluster)
+make test        # 247 tests (~4s; 12 skip themselves without a cluster)
 make check       # lint + mypy --strict + tests, which is CI's first job
 
 python scripts/eval_extraction.py    # extraction accuracy, per layer and field
@@ -184,6 +185,46 @@ An agentic extractor was built and measured before this shape was settled on: it
 cost **$2.56 for one company**, made six tool calls including three 404s, and read
 an unrelated company's page. [`docs/decisions.md`](docs/decisions.md) has the run,
 the reasoning, and the limits of that evidence.
+
+### Incremental re-crawl: the cheapest extraction is the one you skip
+
+A directory changes slowly. Re-crawling it monthly means fetching 50,000 pages
+of which perhaps 500 differ, and then paying to extract all 50,000 — and
+extraction is the only stage that can reach the model.
+
+So a record carries the SHA-256 of the page body it came from, and the next
+crawl reads the last known hash back before extracting:
+
+```
+fetch page -> hash body -> hash matches the indexed one? -> drop it here
+```
+
+Dropped *after* the fetch, not before: the hash is of the body, so the only way
+to know is to read it. What is saved is extraction and everything downstream of
+it, which is where the cost is. `Last-Modified` and `ETag` would let the fetch
+be skipped too, and are the obvious next step.
+
+Three decisions worth stating:
+
+- **The hashes are loaded in the activity, not passed down by the workflow.**
+  The plumbing already existed as a `seen_hashes` argument threaded from the
+  workflow — which would put a 50,000-entry map into workflow history, where it
+  is replayed on every task, and blow the payload limit long before that
+  mattered. Each activity now looks up only the 25 it is about to fetch.
+- **Looked up by document id, not by query.** `record_id` is
+  `sha1(source:source_id)`, so there is exactly one document per pair and the
+  id is computable without asking. `mget`, no scoring, no dependence on the
+  refresh interval having caught up.
+- **One function derives the id for both halves.** The activity looks hashes up
+  by `source_id` and the crawler writes records under `source_id`. Two
+  implementations that drifted would produce keys that never match, and the
+  symptom would not be an error — it would be a crawl that silently never
+  skips anything. `source_id_from_url` is public for that reason.
+
+An empty or absent hash reads as "fetch it", so a first crawl and a crawl after
+a schema change behave identically. `force_refetch` on `CrawlRequest` skips the
+lookup entirely — the escape hatch for when the extractor changed rather than
+the page. It was declared and read by nothing until now.
 
 ### The search console
 
@@ -493,7 +534,7 @@ src/directory_pipeline/
 
 ## Testing
 
-226 tests. 216 need neither network nor Docker; the remaining 10 **skip
+247 tests. 235 need neither network nor Docker; the remaining 12 **skip
 themselves** when no cluster is reachable — nine OpenSearch integration tests
 and one that launches the MCP server as a subprocess.
 
@@ -645,5 +686,12 @@ tests — could see a single type.
   crawler — are the code `scripts/verify_stack.sh` and `scripts/run_local.py`
   exercise, and neither reports coverage. The number is a regression guard, not
   a quality claim.
+- Incremental re-crawl skips *extraction*, not the fetch: the hash is of the
+  response body. `Last-Modified`/`ETag` would skip the request too.
+- `SCHEMA_VERSION` is 4 because `content_hash` had to be mapped, and
+  `dynamic: strict` makes adding a field a schema change. An existing
+  deployment needs `POST /ingest/reindex` to carry its data onto the new
+  mapping — which is what the alias-swap machinery is for, and the first time
+  it has been needed for its actual purpose.
 - Verified locally only: no cloud deployment, and nothing here has run against a
   real directory site.

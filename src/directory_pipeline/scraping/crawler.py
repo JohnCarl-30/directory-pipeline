@@ -97,7 +97,7 @@ class DirectoryCrawler:
                 response = await self.client.get(url)
         return RawListing(
             source=source,
-            source_id=_source_id_from_url(url),
+            source_id=source_id_from_url(url),
             url=response.url,
             html=response.text,
             http_status=response.status,
@@ -127,7 +127,14 @@ class DirectoryCrawler:
             yield listing
 
 
-def _source_id_from_url(url: str) -> str:
-    """Last non-empty path segment. Stable across query-string churn."""
+def source_id_from_url(url: str) -> str:
+    """Last non-empty path segment. Stable across query-string churn.
+
+    Public because the fetch activity needs the same mapping to look up a
+    page's last known content hash before deciding to fetch it. A second
+    implementation that drifted from this one would produce lookup keys that
+    never match the keys records were written under, and incremental
+    re-crawl would stop working with no error anywhere.
+    """
     path = url.split("?", 1)[0].rstrip("/")
     return path.rsplit("/", 1)[-1] or path

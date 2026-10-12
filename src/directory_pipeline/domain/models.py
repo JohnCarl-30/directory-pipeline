@@ -16,7 +16,7 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 
 
 def _now() -> datetime:
@@ -155,6 +155,7 @@ class EnrichedCompany(BaseModel):
             "source": c.source,
             "source_id": c.source_id,
             "source_url": c.source_url,
+            "content_hash": c.content_hash,
             "name": c.name,
             "name_normalized": c.name_normalized,
             "legal_name": c.legal_name,
