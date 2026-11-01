@@ -4,7 +4,7 @@
 # Two stages so the final image holds only the installed packages. uv (~50MB),
 # pip and the build-time lockfile export stay in the builder and are discarded.
 
-FROM python:3.12-slim AS builder
+FROM python:3.15-slim AS builder
 
 # Pinned: this resolves the lockfile, so a floating tag would put a build tool
 # with its own release cadence in the middle of a reproducibility guarantee.
@@ -34,7 +34,7 @@ RUN uv venv /opt/venv \
  && uv pip install --python /opt/venv/bin/python --no-cache -r /tmp/req.txt \
  && uv pip install --python /opt/venv/bin/python --no-cache --no-deps .
 
-FROM python:3.12-slim
+FROM python:3.15-slim
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
