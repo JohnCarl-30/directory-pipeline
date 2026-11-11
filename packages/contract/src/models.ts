@@ -136,6 +136,7 @@ export const CrawlRequest = z.strictObject({
   force_refetch: z.boolean().default(false),
   pending_urls: stringList(),
   carried_totals: z.record(z.string(), z.number().int()).default(() => ({})),
+  crawl_started_at: IsoDateTime.nullable().default(null),
 });
 export type CrawlRequest = z.output<typeof CrawlRequest>;
 

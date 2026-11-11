@@ -17,6 +17,7 @@ import pytest
 from temporalio import activity
 from temporalio.client import Client
 from temporalio.contrib.pydantic import pydantic_data_converter
+from temporalio.exceptions import ApplicationError
 from temporalio.testing import WorkflowEnvironment
 from temporalio.worker import Worker
 
@@ -67,6 +68,8 @@ class FakeActivities:
         self.indexed: list[EnrichedCompany] = []
         self.batch_calls = 0
         self.attempts = 0
+        self.resolve_calls: list[tuple[str | None, str | None, int]] = []
+        self.bootstrapped: list[str | None] = []
 
     @activity.defn(name="discover_listings")
     async def discover_listings(self, category: str, max_pages: int) -> list[str]:
@@ -94,15 +97,15 @@ class FakeActivities:
             for r in records
         ]
 
-    @activity.defn(name="resolve_duplicates")
-    async def resolve_duplicates(
-        self, companies: list[EnrichedCompany], adjudicate: bool = True
-    ) -> list[EnrichedCompany]:
-        return [c.model_copy(update={"cluster_id": c.company.record_id}) for c in companies]
+    @activity.defn(name="resolve_index")
+    async def resolve_index(self, alias: str | None = None, since: str | None = None) -> int:
+        self.resolve_calls.append((alias, since, len(self.indexed)))
+        return 1
 
     @activity.defn(name="bootstrap_index")
-    async def bootstrap_index(self, alias: str) -> str:
-        return f"{alias}-v3-test"
+    async def bootstrap_index(self, alias: str | None = None) -> str:
+        self.bootstrapped.append(alias)
+        return f"{alias or 'companies'}-v3-test"
 
     @activity.defn(name="index_documents")
     async def index_documents(
@@ -127,7 +130,7 @@ class FakeActivities:
             self.discover_listings,
             self.fetch_and_extract,
             self.enrich_records,
-            self.resolve_duplicates,
+            self.resolve_index,
             self.bootstrap_index,
             self.index_documents,
             self.reindex_alias,
@@ -313,6 +316,72 @@ async def test_carried_totals_are_added_to_the_continuation_result(env):
 
     assert result.records_extracted == 101  # 100 carried + 1 this run
     assert result.documents_indexed == 91
+
+
+async def test_duplicates_are_resolved_once_across_the_index_after_every_batch(env):
+    """Per-batch resolution never compared records in different batches. The
+    crawl resolves once, over the whole index, after the last batch wrote."""
+    activities = FakeActivities()
+    result = await run_crawl(
+        env,
+        activities,
+        CrawlRequest(categories=["software"], max_pages=3, batch_size=2),
+    )
+
+    assert len(activities.resolve_calls) == 1
+    alias, since, indexed_before = activities.resolve_calls[0]
+    assert indexed_before == 6, "resolution runs after all three batches indexed"
+    assert since is not None
+    assert result.duplicates_collapsed == 1  # the index-wide count it returned
+
+
+async def test_a_continuation_resolves_from_the_start_of_the_whole_crawl(env):
+    """`since` must cover what earlier runs of the crawl wrote, or their
+    records would look untouched and skip adjudication."""
+    from datetime import UTC, datetime
+
+    first_run = datetime(2026, 1, 1, tzinfo=UTC)
+    activities = FakeActivities()
+    await run_crawl(
+        env,
+        activities,
+        CrawlRequest(
+            categories=[],
+            max_pages=0,
+            batch_size=10,
+            pending_urls=["http://test/company/a"],
+            crawl_started_at=first_run,
+        ),
+    )
+
+    assert activities.resolve_calls[0][1] == first_run.isoformat()
+
+
+async def test_a_failed_resolution_is_reported_not_fatal(env):
+    class BrokenResolution(FakeActivities):
+        @activity.defn(name="resolve_index")
+        async def resolve_index(self, alias=None, since=None):
+            raise ApplicationError("cluster unreachable", non_retryable=True)
+
+    result = await run_crawl(
+        env,
+        BrokenResolution(),
+        CrawlRequest(categories=["software"], max_pages=1, batch_size=10),
+    )
+
+    assert result.documents_indexed == 2, "the documents still landed"
+    assert any("resolution failed" in f for f in result.failures)
+
+
+async def test_bootstrap_and_writes_share_the_default_alias(env):
+    """No index_alias means the worker's configured alias for every activity.
+    The workflow used to bootstrap a literal "companies" while the writes went
+    to the configured alias."""
+    activities = FakeActivities()
+    await run_crawl(env, activities, CrawlRequest(categories=["software"], max_pages=1))
+
+    assert activities.bootstrapped == [None]
+    assert activities.resolve_calls[0][0] is None
 
 
 async def test_reindex_workflow_returns_the_swap_result(env):

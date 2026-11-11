@@ -197,6 +197,7 @@ def model_cases() -> list[tuple[str, BaseModel]]:
                 force_refetch=True,
                 pending_urls=["http://localhost:8081/company/a"],
                 carried_totals={"pages_crawled": 7, "documents_indexed": 12},
+                crawl_started_at=T_OFFSET,
             ),
         ),
         (

@@ -114,3 +114,10 @@ def test_physical_index_names_never_collide():
     """
     names = {physical_index_name("companies") for _ in range(100)}
     assert len(names) == 100
+
+
+def test_model_assisted_records_get_the_ranking_penalty():
+    """The extractor writes `llm_repaired`; a filter on `llm` alone matched nothing."""
+    functions = build_query(q="acme")["query"]["function_score"]["functions"]
+    penalty = next(f for f in functions if "weight" in f)
+    assert set(penalty["filter"]["terms"]["extraction.method"]) >= {"llm", "llm_repaired"}

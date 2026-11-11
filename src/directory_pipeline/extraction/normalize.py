@@ -15,6 +15,8 @@ import re
 import unicodedata
 from urllib.parse import urlsplit, urlunsplit
 
+from ..observability import METRICS
+
 # Suffixes stripped before matching -- "Acme Inc." and "Acme LLC" should block
 # together during entity resolution even though they are different legal forms.
 _LEGAL_SUFFIXES = {
@@ -204,6 +206,82 @@ def normalize_region(raw: str | None) -> str | None:
     if len(candidate) == 2 and candidate.upper() in set(_US_STATES.values()):
         return candidate.upper()
     return _US_STATES.get(candidate.lower())
+
+
+# Spelled-out names and alpha-3 codes for the countries a US-centric directory
+# actually lists. Not a full ISO-3166 table: anything unrecognized falls back
+# to the caller's default and is counted, rather than guessed at.
+_COUNTRIES: dict[str, str] = {
+    "united states": "US",
+    "united states of america": "US",
+    "usa": "US",
+    "u.s.": "US",
+    "u.s.a.": "US",
+    "america": "US",
+    "canada": "CA",
+    "can": "CA",
+    "mexico": "MX",
+    "mex": "MX",
+    "united kingdom": "GB",
+    "great britain": "GB",
+    "england": "GB",
+    "scotland": "GB",
+    "wales": "GB",
+    "uk": "GB",
+    "gbr": "GB",
+    "ireland": "IE",
+    "irl": "IE",
+    "germany": "DE",
+    "deu": "DE",
+    "france": "FR",
+    "fra": "FR",
+    "netherlands": "NL",
+    "the netherlands": "NL",
+    "nld": "NL",
+    "spain": "ES",
+    "esp": "ES",
+    "italy": "IT",
+    "ita": "IT",
+    "switzerland": "CH",
+    "che": "CH",
+    "sweden": "SE",
+    "swe": "SE",
+    "israel": "IL",
+    "isr": "IL",
+    "india": "IN",
+    "ind": "IN",
+    "china": "CN",
+    "chn": "CN",
+    "japan": "JP",
+    "jpn": "JP",
+    "singapore": "SG",
+    "sgp": "SG",
+    "australia": "AU",
+    "aus": "AU",
+    "new zealand": "NZ",
+    "nzl": "NZ",
+    "brazil": "BR",
+    "bra": "BR",
+}
+
+
+def normalize_country(raw: str | None, default: str = "US") -> str:
+    """Country name or code -> ISO-3166 alpha-2.
+
+    Never by slicing: the first two letters of a name are a different country
+    as often as not ("Germany" is GE, Georgia; "United States" is UN).
+    """
+    cleaned = clean_text(raw)
+    if not cleaned:
+        return default
+    candidate = cleaned.strip()
+    if len(candidate) == 2 and candidate.isalpha():
+        return candidate.upper()
+    code = _COUNTRIES.get(candidate.lower())
+    if code is None:
+        METRICS.incr("extract.country_unrecognized")
+        return default
+    return code
 
 
 def normalize_postal_code(raw: str | None) -> str | None:

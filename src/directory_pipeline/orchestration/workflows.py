@@ -52,6 +52,7 @@ with workflow.unsafe.imports_passed_through():
         INDEX_TIMEOUTS,
         REINDEX_RETRY,
         REINDEX_TIMEOUTS,
+        RESOLVE_TIMEOUTS,
         SCRAPE_RETRY,
     )
 
@@ -62,9 +63,14 @@ MAX_URLS_PER_RUN = 2_000
 
 @workflow.defn(name="ProcessBatchWorkflow")
 class ProcessBatchWorkflow:
-    """One batch: fetch -> extract -> enrich -> resolve -> index.
+    """One batch: fetch -> extract -> enrich -> index.
 
     Isolated as a child so a batch that fails after 6 retries fails alone.
+
+    Duplicates are *not* resolved here. A batch is 25 records -- and with
+    incremental crawl only the changed ones -- so most duplicates are in some
+    other batch, or in the index from an earlier crawl. The parent resolves
+    across the whole index once every batch has written.
     """
 
     def __init__(self) -> None:
@@ -98,7 +104,7 @@ class ProcessBatchWorkflow:
         )
         if not records:
             self._stage = "empty"
-            return {"extracted": 0, "enriched": 0, "duplicates": 0, "indexed": 0}
+            return {"extracted": 0, "enriched": 0, "indexed": 0}
 
         if enrich:
             self._stage = "enriching"
@@ -111,15 +117,6 @@ class ProcessBatchWorkflow:
             )
         else:
             companies = [EnrichedCompany(company=r) for r in records]
-
-        self._stage = "resolving"
-        companies = await workflow.execute_activity(
-            "resolve_duplicates",
-            args=[companies, True],
-            result_type=list[EnrichedCompany],
-            retry_policy=API_RETRY,
-            **ENRICH_TIMEOUTS,
-        )
 
         self._stage = "indexing"
         indexed: int = await workflow.execute_activity(
@@ -134,7 +131,6 @@ class ProcessBatchWorkflow:
         return {
             "extracted": len(records),
             "enriched": sum(1 for c in companies if c.enrichment is not None),
-            "duplicates": sum(1 for c in companies if c.duplicate_of),
             "indexed": indexed,
         }
 
@@ -162,11 +158,15 @@ class CrawlDirectoryWorkflow:
         info = workflow.info()
         result = CrawlResult(run_id=info.run_id, started_at=workflow.now())
         alias = request.index_alias
+        crawl_started_at = request.crawl_started_at or result.started_at
 
-        # Ensure the alias exists before anything writes through it.
+        # Ensure the alias exists before anything writes through it. `alias`
+        # goes through as-is: None means the worker's configured alias, the
+        # same default every write activity falls back to. Substituting a
+        # literal here bootstrapped one alias and wrote through another.
         index_name: str = await workflow.execute_activity(
             "bootstrap_index",
-            args=[alias or "companies"],
+            args=[alias],
             result_type=str,
             retry_policy=INDEX_RETRY,
             **INDEX_TIMEOUTS,
@@ -246,8 +246,23 @@ class CrawlDirectoryWorkflow:
                 self._progress["batches_done"] += 1
             result.records_extracted += counts["extracted"]
             result.records_enriched += counts["enriched"]
-            result.duplicates_collapsed += counts["duplicates"]
             result.documents_indexed += counts["indexed"]
+
+        if not overflow or self._cancelled:
+            # The last run of the crawl (or a stopped one): resolve duplicates
+            # across the whole index, now that everything this crawl will
+            # write has been written. A failure here is reported, not fatal --
+            # the documents are indexed and the next crawl resolves again.
+            try:
+                result.duplicates_collapsed = await workflow.execute_activity(
+                    "resolve_index",
+                    args=[alias, crawl_started_at.isoformat()],
+                    result_type=int,
+                    retry_policy=API_RETRY,
+                    **RESOLVE_TIMEOUTS,
+                )
+            except ActivityError as exc:
+                result.failures.append(f"resolution failed: {exc}")
 
         result.finished_at = workflow.now()
         self._result = result
@@ -265,12 +280,14 @@ class CrawlDirectoryWorkflow:
                             "categories": [],
                             "max_pages": 0,
                             "pending_urls": overflow,
+                            "crawl_started_at": crawl_started_at,
+                            # No duplicates_collapsed: it is an index-wide
+                            # count, set once by the final run's resolution.
                             "carried_totals": {
                                 "listings_found": result.listings_found,
                                 "pages_crawled": result.pages_crawled,
                                 "records_extracted": result.records_extracted,
                                 "records_enriched": result.records_enriched,
-                                "duplicates_collapsed": result.duplicates_collapsed,
                                 "documents_indexed": result.documents_indexed,
                             },
                         }

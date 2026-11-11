@@ -113,6 +113,39 @@ def record(name: str, *, website: str | None = None) -> CompanyRecord:
 # LLMExtractor
 # --------------------------------------------------------------------------
 @pytest.mark.asyncio
+async def test_model_confidence_cannot_lift_a_sparse_record(llm_settings):
+    """The weaker source caps the score. A model claiming 0.95 on a page where
+    the selectors found only a name is still a mostly-guessed record."""
+    from directory_pipeline.extraction.cascade import Extractor
+
+    extractor = Extractor(llm_settings)
+    assert extractor.llm is not None
+    extractor.llm._client = FakeClient(
+        FakeResponse(content=[FakeTextBlock('{"name": "Acme", "confidence": 0.95}')])
+    )
+    page = listing('<html><body><h1 class="company-name">Acme</h1></body></html>')
+    record = await extractor.extract(page)
+    assert record.extraction_method.value == "llm_repaired"
+    # 1 of 4 critical fields present: 0.25, not the model's 0.95 capped to 0.9.
+    assert record.extraction_confidence == 0.25
+
+
+@pytest.mark.asyncio
+async def test_a_spelled_out_country_from_the_model_becomes_its_code(llm_settings):
+    from directory_pipeline.extraction.cascade import Extractor
+
+    extractor = Extractor(llm_settings)
+    assert extractor.llm is not None
+    extractor.llm._client = FakeClient(
+        FakeResponse(
+            content=[FakeTextBlock('{"name": "Acme", "country": "Germany", "confidence": 0.9}')]
+        )
+    )
+    record = await extractor.extract(listing())
+    assert record.address.country == "DE"
+
+
+@pytest.mark.asyncio
 async def test_extract_parses_a_schema_constrained_response(llm_settings):
     extractor = LLMExtractor(llm_settings)
     extractor._client = FakeClient(

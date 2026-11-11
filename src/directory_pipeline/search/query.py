@@ -109,8 +109,10 @@ def build_query(
                     }
                 },
                 {
-                    # Slight penalty for records the model had to guess at.
-                    "filter": {"term": {"extraction.method": "llm"}},
+                    # Slight penalty for records the model had to guess at. The
+                    # extractor writes `llm_repaired` when the model filled
+                    # gaps, so matching only `llm` penalized nothing.
+                    "filter": {"terms": {"extraction.method": ["llm", "llm_repaired"]}},
                     "weight": 0.95,
                 },
             ],

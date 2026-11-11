@@ -103,7 +103,7 @@ async def run_worker() -> None:
             activities.discover_listings,
             activities.fetch_and_extract,
             activities.enrich_records,
-            activities.resolve_duplicates,
+            activities.resolve_index,
             activities.bootstrap_index,
             activities.index_documents,
             activities.reindex_alias,

@@ -55,9 +55,10 @@ which is exactly the layer Temporal owns.
                     │                                          │
   FastAPI  ──────▶  │  CrawlDirectoryWorkflow                  │
   POST /ingest/crawl│      ├── discover_listings (per category)│
-                    │      └── ProcessBatchWorkflow  × N       │
-                    │             fetch+extract → enrich       │
-                    │             → resolve → index            │
+                    │      ├── ProcessBatchWorkflow  × N       │
+                    │      │      fetch+extract → enrich       │
+                    │      │      → index                      │
+                    │      └── resolve_index (whole index)     │
                     │                                          │
                     │  ReindexWorkflow → atomic alias swap     │
                     └──────────────────────┬───────────────────┘
@@ -325,6 +326,18 @@ Duplicates are indexed with `duplicate_of` set rather than deleted: dropping
 them loses the provenance that proves the merge was right. Search filters them
 out with `is_canonical`.
 
+**Resolution runs once per crawl, over the whole index — not per batch.** A
+batch is 25 records, and with incremental crawl only the ones whose page
+changed, so per-batch resolution never compared two listings in different
+batches, and resolved a changed duplicate against nothing and wrote it back as
+canonical. `resolve_index` runs after the last batch has written, scores the
+whole corpus, and writes back only the verdicts that changed as partial updates.
+Borderline pairs where neither record was written during this crawl keep the
+verdict already stored in the index, so the adjudicator is paid for what
+changed rather than for the size of the corpus. The cost is a window, while the
+crawl runs, in which a re-written duplicate shows as canonical until the
+closing pass puts it back.
+
 Measured at 100k records against a corpus with known answers, the design
 claims hold and two bugs did not — see [`docs/benchmarks.md`](docs/benchmarks.md):
 
@@ -496,7 +509,7 @@ mean activity latency, by activity_type
   enrich_records                 0.091s
   discover_listings              0.085s
   fetch_and_extract              0.019s
-  resolve_duplicates             0.004s
+  resolve_duplicates             0.004s   (since replaced by resolve_index)
 ```
 
 Those come free with a `Runtime`, but not with the SDK's default flags: it ships
