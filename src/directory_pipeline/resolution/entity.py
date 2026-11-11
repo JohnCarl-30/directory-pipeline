@@ -305,14 +305,90 @@ def resolve(
 
     cluster_of: dict[str, str] = {}
     canonical_of: dict[str, str] = {}
-    for root, members in clusters.items():
+    for members in clusters.values():
         # Canonical = most complete record; ties broken by id for determinism,
         # so re-running the pipeline picks the same survivor every time.
         canonical = max(members, key=lambda rid: (_completeness(by_id[rid]), rid))
+        # The cluster is named by its smallest member id, not by the
+        # union-find root: the root depends on the order pairs were merged in,
+        # so an unchanged cluster would get a new id -- and a write -- on
+        # every index-wide pass.
+        cluster_id = min(members)
         for member in members:
-            cluster_of[member] = root
+            cluster_of[member] = cluster_id
             canonical_of[member] = canonical
     return cluster_of, canonical_of
+
+
+# --- index-wide resolution -----------------------------------------------------
+#
+# Resolution runs over the whole index at the end of a crawl, not per batch. A
+# batch is 25 records: two listings for the same company in different batches
+# were never compared, and with incremental crawl a batch holds only the pages
+# that changed -- so a changed duplicate was resolved against nothing, written
+# back as canonical, and reappeared in search.
+
+
+@dataclass
+class IndexedRecord:
+    """A record as it currently sits in the index, with its last verdict."""
+
+    record: CompanyRecord
+    cluster_id: str | None
+    duplicate_of: str | None
+    # Written during this crawl. Untouched records keep their earlier
+    # adjudication verdicts instead of paying for the model again.
+    touched: bool
+
+
+def split_borderline(
+    candidates: list[Candidate], rows: list[IndexedRecord]
+) -> tuple[list[Candidate], list[Candidate]]:
+    """Borderline pairs -> (accepted on an earlier verdict, still to adjudicate).
+
+    The index remembers what the adjudicator decided: a pair it accepted ended
+    up in one cluster. If neither record has changed since, that answer still
+    stands and asking the model again would be paying twice for it. A pair
+    with a changed side, or one never accepted, needs a fresh decision.
+
+    One approximation, accepted for the cost: two untouched records that share
+    a cluster through a chain of other matches count as an accepted pair too.
+    That only matters if the chain later breaks, and then the pair is held
+    together until one side changes. Likewise, an adjudicator switched on
+    after a corpus was built sees its older borderline pairs as they change,
+    not all at once -- `force_refetch` re-touches everything if that matters.
+    """
+    by_id = {row.record.record_id: row for row in rows}
+    reused: list[Candidate] = []
+    fresh: list[Candidate] = []
+    for candidate in candidates:
+        if not candidate.needs_review:
+            continue
+        left = by_id.get(candidate.left.record_id)
+        right = by_id.get(candidate.right.record_id)
+        if left is None or right is None or left.touched or right.touched:
+            fresh.append(candidate)
+        elif left.cluster_id and left.cluster_id == right.cluster_id:
+            reused.append(candidate)
+        # else: untouched and kept apart last time -- still apart.
+    return reused, fresh
+
+
+def cluster_updates(
+    rows: list[IndexedRecord],
+    cluster_of: dict[str, str],
+    canonical_of: dict[str, str],
+) -> dict[str, tuple[str, str | None]]:
+    """`record_id -> (cluster_id, duplicate_of)` for rows whose verdict changed."""
+    updates: dict[str, tuple[str, str | None]] = {}
+    for row in rows:
+        rid = row.record.record_id
+        cluster = cluster_of.get(rid, rid)
+        canonical = canonical_of.get(rid, rid)
+        duplicate_of = None if canonical == rid else canonical
+        if (row.cluster_id, row.duplicate_of) != (cluster, duplicate_of):
+            updates[rid] = (cluster, duplicate_of)
+    return updates
 
 
 def _completeness(record: CompanyRecord) -> int:

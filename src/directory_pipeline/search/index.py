@@ -30,11 +30,12 @@ from datetime import UTC, datetime
 from typing import Any, cast
 
 from opensearchpy import AsyncOpenSearch, NotFoundError, RequestError
-from opensearchpy.helpers import async_bulk
+from opensearchpy.helpers import async_bulk, async_scan
 
 from ..config import Settings
-from ..domain.models import SCHEMA_VERSION, CompanyRecord, EnrichedCompany
+from ..domain.models import SCHEMA_VERSION, Address, CompanyRecord, Contact, EnrichedCompany
 from ..observability import METRICS, get_logger, timed
+from ..resolution.entity import IndexedRecord
 
 log = get_logger(__name__)
 
@@ -42,6 +43,72 @@ INGEST_PIPELINE_ID = "companies-normalize"
 
 # mget ids per request. Keeps one backfill from building a megabyte of JSON.
 _MGET_CHUNK = 1_000
+
+# What index-wide resolution reads back: the fields scoring and canonical
+# selection use, plus the verdict already stored and when the document was
+# last written.
+_RESOLUTION_SOURCE = [
+    "record_id",
+    "source",
+    "source_id",
+    "source_url",
+    "content_hash",
+    "name",
+    "name_normalized",
+    "legal_name",
+    "categories",
+    "description",
+    "address",
+    "contact",
+    "employee_count",
+    "founded_year",
+    "cluster_id",
+    "duplicate_of",
+    "indexed_at",
+]
+
+
+def _parse_timestamp(value: Any) -> datetime | None:
+    if not isinstance(value, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+
+
+def _record_from_document(doc: dict[str, Any]) -> CompanyRecord:
+    """Rebuild the parts of a CompanyRecord that resolution reads."""
+    address = doc.get("address") or {}
+    contact = doc.get("contact") or {}
+    return CompanyRecord(
+        record_id=doc["record_id"],
+        source=doc.get("source") or "",
+        source_id=doc.get("source_id") or "",
+        source_url=doc.get("source_url") or "",
+        content_hash=doc.get("content_hash") or "",
+        name=doc.get("name") or "",
+        name_normalized=doc.get("name_normalized") or "",
+        legal_name=doc.get("legal_name"),
+        categories=doc.get("categories") or [],
+        description=doc.get("description"),
+        address=Address(
+            line1=address.get("line1"),
+            city=address.get("city"),
+            region=address.get("region"),
+            postal_code=address.get("postal_code"),
+            country=address.get("country") or "US",
+        ),
+        contact=Contact(
+            phone_e164=contact.get("phone_e164"),
+            email=contact.get("email"),
+            website=contact.get("website"),
+        ),
+        employee_count=doc.get("employee_count"),
+        founded_year=doc.get("founded_year"),
+    )
+
 
 # Custom analyzers. `company_name_analyzer` strips the legal suffixes that make
 # "Acme Inc" and "Acme LLC" look different to BM25 -- the same normalization the
@@ -317,16 +384,26 @@ class SearchIndex:
         if not companies:
             return 0
 
-        actions = [
-            {
-                "_op_type": "index",
-                "_index": target,
-                "_id": company.company.record_id,
-                "pipeline": INGEST_PIPELINE_ID,
-                "_source": company.to_document(),
-            }
-            for company in companies
-        ]
+        # An `index` op replaces the whole document, so a re-crawled page
+        # would otherwise be "first seen" again every time it changed.
+        first_seen = await self._existing_first_seen(
+            [company.company.record_id for company in companies], target
+        )
+
+        actions = []
+        for company in companies:
+            document = company.to_document()
+            if earlier := first_seen.get(company.company.record_id):
+                document["first_seen_at"] = earlier
+            actions.append(
+                {
+                    "_op_type": "index",
+                    "_index": target,
+                    "_id": company.company.record_id,
+                    "pipeline": INGEST_PIPELINE_ID,
+                    "_source": document,
+                }
+            )
 
         with timed("index.bulk"):
             succeeded, raw_errors = await async_bulk(
@@ -343,6 +420,22 @@ class SearchIndex:
                 log.error("index.bulk_error", detail=error)
         METRICS.incr("index.documents", succeeded)
         return int(succeeded)
+
+    async def _existing_first_seen(self, record_ids: list[str], target: str) -> dict[str, str]:
+        """`record_id -> first_seen_at` for documents already in the index."""
+        found: dict[str, str] = {}
+        for start in range(0, len(record_ids), _MGET_CHUNK):
+            chunk = record_ids[start : start + _MGET_CHUNK]
+            try:
+                response = await self.client.mget(
+                    body={"ids": chunk}, index=target, _source=["first_seen_at"]
+                )
+            except NotFoundError:
+                return {}  # no index yet: everything is new
+            for doc in response.get("docs", []):
+                if doc.get("found") and (seen := (doc.get("_source") or {}).get("first_seen_at")):
+                    found[doc["_id"]] = seen
+        return found
 
     async def content_hashes(
         self, source: str, source_ids: list[str], *, alias: str | None = None
@@ -396,6 +489,89 @@ class SearchIndex:
 
         METRICS.incr("index.content_hashes_loaded", len(hashes))
         return hashes
+
+    async def load_for_resolution(
+        self,
+        *,
+        alias: str | None = None,
+        since: datetime | None = None,
+        on_page: Callable[[int], None] | None = None,
+    ) -> list[IndexedRecord]:
+        """Every document behind the alias, as resolution input.
+
+        `since` marks which documents this crawl wrote: `indexed_at` (set by
+        the ingest pipeline) at or after it means touched. A document with no
+        readable `indexed_at`, or a call with no `since`, counts as touched --
+        the cost of being wrong that way is one extra adjudication, the other
+        way a stale verdict.
+        """
+        target = alias or self.alias
+        rows: list[IndexedRecord] = []
+        try:
+            async for hit in async_scan(
+                self.client,
+                index=target,
+                query={"query": {"match_all": {}}, "_source": _RESOLUTION_SOURCE},
+                size=1_000,
+            ):
+                doc = hit.get("_source") or {}
+                try:
+                    record = _record_from_document(doc)
+                except (KeyError, ValueError) as exc:
+                    log.warning("resolve.unreadable_document", id=hit.get("_id"), error=str(exc))
+                    continue
+                indexed_at = _parse_timestamp(doc.get("indexed_at"))
+                touched = since is None or indexed_at is None or indexed_at >= since
+                rows.append(
+                    IndexedRecord(
+                        record=record,
+                        cluster_id=doc.get("cluster_id"),
+                        duplicate_of=doc.get("duplicate_of"),
+                        touched=touched,
+                    )
+                )
+                if on_page and len(rows) % 1_000 == 0:
+                    on_page(len(rows))
+        except NotFoundError:
+            return []
+        return rows
+
+    async def apply_clusters(
+        self, updates: dict[str, tuple[str, str | None]], *, alias: str | None = None
+    ) -> int:
+        """Write new cluster verdicts as partial updates.
+
+        Partial, not a re-index: only the three verdict fields change, and the
+        rest of the document -- `first_seen_at`, `indexed_at`, enrichment -- is
+        left exactly as the crawl wrote it.
+        """
+        if not updates:
+            return 0
+        target = alias or self.alias
+        actions = [
+            {
+                "_op_type": "update",
+                "_index": target,
+                "_id": record_id,
+                "doc": {
+                    "cluster_id": cluster_id,
+                    "duplicate_of": duplicate_of,
+                    "is_canonical": duplicate_of is None,
+                },
+            }
+            for record_id, (cluster_id, duplicate_of) in updates.items()
+        ]
+        with timed("index.cluster_updates"):
+            succeeded, raw_errors = await async_bulk(
+                self.client, actions, raise_on_error=False, stats_only=False
+            )
+        errors = cast("list[Any]", raw_errors)
+        if errors:
+            METRICS.incr("index.cluster_update_errors", len(errors))
+            for error in list(errors)[:5]:
+                log.error("index.cluster_update_error", detail=error)
+        METRICS.incr("index.cluster_updates", succeeded)
+        return int(succeeded)
 
     async def _reindex_via_task(
         self,
@@ -496,6 +672,20 @@ class SearchIndex:
         resume_target = (resume or {}).get("target_index")
         target = resume_target or physical_index_name(alias)
 
+        if resume_target and source == resume_target:
+            # The previous attempt got as far as the swap and died before it
+            # could report back. The work is done; finish the bookkeeping
+            # rather than refusing to "reindex an index into itself" on every
+            # retry and failing a workflow whose reindex succeeded.
+            return await self._finish_swapped(
+                alias=alias,
+                target=target,
+                previous=(resume or {}).get("source_index"),
+                task_id=resume_task_id,
+                drop_old_index=drop_old_index,
+                started=started,
+            )
+
         if target == source:
             # Unreachable with a unique suffix, but the failure mode this
             # guards against is subtle enough to be worth an explicit error
@@ -533,7 +723,9 @@ class SearchIndex:
                     body,
                     on_progress=on_progress,
                     resume_task_id=resume_task_id,
-                    progress_extra={"target_index": target},
+                    # The source rides along too: if this attempt dies after
+                    # the swap, the retry needs it to drop the old index.
+                    progress_extra={"target_index": target, "source_index": source},
                     poll_interval_s=poll_interval_s,
                 )
             copied = int(response.get("created", 0)) + int(response.get("updated", 0))
@@ -563,6 +755,41 @@ class SearchIndex:
         return {
             "alias": alias,
             "source_index": source,
+            "target_index": target,
+            "documents_copied": copied,
+            "swapped": True,
+            "old_index_dropped": dropped,
+            "duration_s": round(time.perf_counter() - started, 3),
+        }
+
+    async def _finish_swapped(
+        self,
+        *,
+        alias: str,
+        target: str,
+        previous: str | None,
+        task_id: str | None,
+        drop_old_index: bool,
+        started: float,
+    ) -> dict[str, Any]:
+        """Report a reindex whose swap a previous attempt already made."""
+        log.info("reindex.already_swapped", alias=alias, target=target, previous=previous)
+        copied = 0
+        if task_id:
+            status = await self.client.tasks.get(task_id=task_id)
+            response = status.get("response") or {}
+            copied = int(response.get("created", 0)) + int(response.get("updated", 0))
+
+        dropped = False
+        if drop_old_index and previous and previous != target:
+            # The previous attempt may have dropped it already.
+            await self.client.indices.delete(index=previous, ignore_unavailable=True)
+            dropped = True
+            log.warning("reindex.old_index_dropped", index=previous)
+
+        return {
+            "alias": alias,
+            "source_index": previous,
             "target_index": target,
             "documents_copied": copied,
             "swapped": True,

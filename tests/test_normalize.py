@@ -154,3 +154,24 @@ def test_all_normalizers_are_total():
         nz.parse_employee_count(value)
         nz.parse_year(value)
         nz.split_categories(value)
+        nz.normalize_country(value)
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("US", "US"),
+        ("us", "US"),
+        ("United States", "US"),  # was "UN"
+        ("USA", "US"),
+        ("U.S.A.", "US"),
+        ("Germany", "DE"),  # was "GE", which is Georgia
+        ("Canada", "CA"),
+        ("United Kingdom", "GB"),  # was "UN"
+        ("", "US"),
+        (None, "US"),
+        ("Atlantis", "US"),  # unrecognized: the default, not a guess
+    ],
+)
+def test_normalize_country(raw, expected):
+    assert nz.normalize_country(raw) == expected

@@ -504,8 +504,12 @@ class Extractor:
             if inferred:
                 # DOM wins: a selector hit is evidence, a model field is a guess.
                 merged = {**{k: v for k, v in inferred.items() if v not in (None, [], "")}, **raw}
+                # The weaker of the two sources sets the score: how much of the
+                # record exists, and how sure the model is of what it added.
+                # Taking the stronger let a model's self-assessment vouch for
+                # a page where the selectors found almost nothing.
                 model_confidence = float(inferred.get("confidence") or 0.0)
-                confidence = max(self._score(merged), min(model_confidence, 0.95))
+                confidence = min(self._score(merged), model_confidence)
                 raw = merged
                 method = ExtractionMethod.LLM_REPAIRED
                 METRICS.incr("extract.llm_repaired")
@@ -561,7 +565,7 @@ class Extractor:
                 city=nz.clean_text(raw.get("city")),
                 region=nz.normalize_region(raw.get("region")),
                 postal_code=nz.normalize_postal_code(raw.get("postal_code")),
-                country=(nz.clean_text(raw.get("country")) or "US")[:2].upper(),
+                country=nz.normalize_country(raw.get("country")),
             ),
             contact=Contact(
                 phone_e164=nz.normalize_phone(raw.get("phone")),

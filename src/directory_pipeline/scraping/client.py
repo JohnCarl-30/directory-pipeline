@@ -26,7 +26,7 @@ import itertools
 import random
 from dataclasses import dataclass
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
 
 import httpx
 
@@ -39,6 +39,16 @@ from .robots import RobotsCache
 log = get_logger(__name__)
 
 RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504, 522, 524}
+
+# Redirects are followed here, one hop at a time, rather than by httpx. Each hop
+# is a request to a URL nobody checked: it may be a path robots.txt disallows,
+# or a different host with its own robots.txt, rate limit and breaker. Letting
+# httpx follow them would fetch all of that behind every gate in this module.
+REDIRECT_STATUS = {301, 302, 303, 307, 308}
+MAX_REDIRECTS = 5
+
+# Request-body arguments dropped when a redirect turns the method into GET.
+_BODY_KWARGS = ("content", "data", "files", "json")
 
 # Browser strings, used only when ROTATE_USER_AGENTS is explicitly turned on --
 # which `Settings` permits only with robots.txt compliance turned off, because
@@ -130,7 +140,11 @@ class ProxyPool:
 
 
 class ResilientClient:
-    """Async HTTP client with limiting, breaking, retries and proxy rotation."""
+    """Async HTTP client with limiting, breaking, retries and proxy rotation.
+
+    Redirects are followed by `request` itself, hop by hop, so robots.txt, the
+    limiter and the breaker apply to every URL actually fetched.
+    """
 
     def __init__(
         self,
@@ -204,7 +218,9 @@ class ResilientClient:
                 if key not in self._clients:
                     self._clients[key] = httpx.AsyncClient(
                         timeout=httpx.Timeout(self.settings.request_timeout_s),
-                        follow_redirects=True,
+                        # Followed hop by hop in `request`, so robots.txt,
+                        # the limiter and the breaker see every URL fetched.
+                        follow_redirects=False,
                         proxy=proxy,
                         limits=httpx.Limits(max_connections=100, max_keepalive_connections=20),
                     )
@@ -258,6 +274,47 @@ class ResilientClient:
         check_robots: bool = True,
         **kwargs: Any,
     ) -> Response:
+        """Send one request, following redirects through every gate.
+
+        Each hop is a full `_send`: its own robots.txt check, its own token from
+        the destination host's bucket, its own breaker. A redirect is a request
+        to a URL nobody vetted, and following it inside httpx would skip all
+        three.
+        """
+        for _hop in range(MAX_REDIRECTS + 1):
+            response = await self._send(
+                method, url, headers=headers, check_robots=check_robots, **kwargs
+            )
+            location = response.headers.get("location")
+            if response.status not in REDIRECT_STATUS or not location:
+                return response
+
+            METRICS.incr("http.redirect", host=urlsplit(url).netloc)
+            url = urljoin(response.url, location)
+            # The Location is the complete target, query string included.
+            kwargs.pop("params", None)
+            # RFC 9110 s15.4: 303 always becomes GET, and so -- by long-standing
+            # client behaviour -- do 301/302 for anything but GET/HEAD. 307 and
+            # 308 exist precisely to keep the method and the body.
+            if response.status == 303 or (
+                response.status in (301, 302) and method not in ("GET", "HEAD")
+            ):
+                method = "GET"
+                for key in _BODY_KWARGS:
+                    kwargs.pop(key, None)
+
+        raise FetchError(f"more than {MAX_REDIRECTS} redirects from {url}", retryable=False)
+
+    async def _send(
+        self,
+        method: str,
+        url: str,
+        *,
+        headers: dict[str, str] | None = None,
+        check_robots: bool = True,
+        **kwargs: Any,
+    ) -> Response:
+        """One URL, no redirects: robots, breaker, limiter, retries."""
         host = urlsplit(url).netloc
         breaker = self.breakers.get(host)
         last_error: Exception | None = None
@@ -275,20 +332,25 @@ class ResilientClient:
                 METRICS.incr("http.circuit_open", host=host)
                 raise FetchError(str(exc), retryable=True) from exc
 
-            waited = await self.limiter.acquire(host)
-            if waited > 0:
-                METRICS.observe("http.rate_limit_wait_s", waited)
-
-            proxy = self.proxies.next()
-            client = await self._client_for(proxy)
-            request_headers = {
-                "User-Agent": self._user_agent(),
-                "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-                **(headers or {}),
-            }
-
+            # From here until on_success/on_failure this request may hold the
+            # breaker's single half-open trial slot. Every way out of the
+            # block below either reports an outcome or hands the slot back;
+            # one that did neither would leave the breaker refusing the host
+            # for the life of the worker.
+            proxy: str | None = None
             try:
+                waited = await self.limiter.acquire(host)
+                if waited > 0:
+                    METRICS.observe("http.rate_limit_wait_s", waited)
+
+                proxy = self.proxies.next()
+                client = await self._client_for(proxy)
+                request_headers = {
+                    "User-Agent": self._user_agent(),
+                    "Accept": "text/html,application/xhtml+xml,application/json;q=0.9,*/*;q=0.8",
+                    "Accept-Language": "en-US,en;q=0.9",
+                    **(headers or {}),
+                }
                 resp = await client.request(method, url, headers=request_headers, **kwargs)
             except (httpx.TransportError, httpx.TimeoutException) as exc:
                 last_error = exc
@@ -299,6 +361,17 @@ class ResilientClient:
                     break
                 await asyncio.sleep(self._backoff(attempt, None))
                 continue
+            except httpx.HTTPError as exc:
+                # Decoding errors and the like: a problem with this response,
+                # not evidence about the host's health, and not one a retry
+                # fixes. Raised as a FetchError so callers that skip failed
+                # pages skip this one too instead of crashing the batch.
+                breaker.release_trial()
+                raise FetchError(f"{type(exc).__name__} for {url}: {exc}", retryable=False) from exc
+            except BaseException:
+                # Cancellation above all: an activity timing out mid-request.
+                breaker.release_trial()
+                raise
 
             METRICS.incr("http.response", host=host, status=str(resp.status_code))
 

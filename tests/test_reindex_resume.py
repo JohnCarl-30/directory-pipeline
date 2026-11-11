@@ -163,3 +163,62 @@ def test_resume_requires_both_the_task_and_the_target(monkeypatch):
     ]:
         monkeypatch.setattr(activity, "info", lambda d=details: FakeInfo(d))
         assert mod._resume_from_heartbeat() == expected, details
+
+
+async def test_a_retry_after_the_swap_reports_success_instead_of_failing(index):
+    """The attempt died between the alias swap and returning. The alias now
+    points at the target, so resolve_alias() returns the same index the
+    heartbeat recorded -- which used to raise 'same index' on every retry."""
+    idx, client = index
+
+    async def already_swapped(**kw: Any) -> dict[str, Any]:
+        return {"companies-v1-inflight": {"aliases": {"companies": {}}}}
+
+    client.indices.get_alias = already_swapped
+    deleted: list[str] = []
+
+    async def delete(index: str, **kw: Any) -> dict[str, Any]:
+        deleted.append(index)
+        return {"acknowledged": True}
+
+    client.indices.delete = delete
+    client.polled.append("earlier-poll")  # so the fake reports the task completed
+    resume = {
+        "task_id": "node-1:9999",
+        "target_index": "companies-v1-inflight",
+        "source_index": "companies-v1-old",
+    }
+
+    result = await idx.reindex(alias="companies", resume=resume, drop_old_index=True)
+
+    assert result["swapped"] is True
+    assert result["target_index"] == "companies-v1-inflight"
+    assert result["source_index"] == "companies-v1-old"
+    assert result["documents_copied"] == 10
+    assert result["old_index_dropped"] is True
+    assert deleted == ["companies-v1-old"]
+    assert client.submitted == [] and client.created == []
+    assert client.alias_actions == [], "the swap is not made a second time"
+
+
+async def test_progress_reports_carry_the_source_index(index):
+    idx, client = index
+    progress: list[dict[str, Any]] = []
+    await idx.reindex(alias="companies", on_progress=progress.append, poll_interval_s=0.01)
+    assert progress[0]["source_index"] == "companies-v1-old"
+
+
+def test_resume_carries_the_source_index_when_recorded(monkeypatch):
+    import directory_pipeline.orchestration.activities as mod
+
+    class FakeInfo:
+        heartbeat_details = (
+            {"task_id": "n:1", "target_index": "companies-v2", "source_index": "companies-v1"},
+        )
+
+    monkeypatch.setattr(activity, "info", lambda: FakeInfo())
+    assert mod._resume_from_heartbeat() == {
+        "task_id": "n:1",
+        "target_index": "companies-v2",
+        "source_index": "companies-v1",
+    }

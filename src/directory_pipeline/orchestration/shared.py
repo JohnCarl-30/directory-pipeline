@@ -118,6 +118,14 @@ INDEX_TIMEOUTS: ActivityTimeouts = {
     "schedule_to_close_timeout": timedelta(minutes=20),
 }
 
+# Index-wide resolution: reads every document, scores in a thread, and may
+# adjudicate. Heartbeats at each step and every 1,000 documents loaded.
+RESOLVE_TIMEOUTS: ActivityTimeouts = {
+    "start_to_close_timeout": timedelta(hours=1),
+    "schedule_to_close_timeout": timedelta(hours=3),
+    "heartbeat_timeout": timedelta(minutes=5),
+}
+
 REINDEX_TIMEOUTS: ActivityTimeouts = {
     "start_to_close_timeout": timedelta(hours=2),
     "schedule_to_close_timeout": timedelta(hours=6),

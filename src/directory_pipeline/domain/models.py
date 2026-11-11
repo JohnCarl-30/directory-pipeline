@@ -237,6 +237,10 @@ class CrawlRequest(BaseModel):
     # silently dropped and the final counts would only cover the last run.
     pending_urls: list[str] = Field(default_factory=list)
     carried_totals: dict[str, int] = Field(default_factory=dict)
+    # When the first run of this crawl started. Carried across continue-as-new
+    # so the closing index-wide resolution knows every document the whole
+    # crawl wrote, not just the ones the last run did.
+    crawl_started_at: datetime | None = None
 
 
 class CrawlResult(BaseModel):

@@ -18,6 +18,8 @@ Two rules every activity here follows:
 
 from __future__ import annotations
 
+import asyncio
+from datetime import datetime
 from typing import Any
 
 from temporalio import activity
@@ -34,7 +36,13 @@ from ..enrichment.provider import EnrichmentProvider
 from ..extraction.cascade import ExtractionError, Extractor
 from ..observability import configure_logging, get_logger
 from ..resolution.adjudicator import Adjudicator
-from ..resolution.entity import Candidate, resolve
+from ..resolution.entity import (
+    Candidate,
+    cluster_updates,
+    generate_candidates,
+    resolve,
+    split_borderline,
+)
 from ..scraping.client import FetchError, ResilientClient
 from ..scraping.crawler import DirectoryCrawler, source_id_from_url
 from ..search.index import SearchIndex
@@ -61,6 +69,9 @@ def _resume_from_heartbeat() -> dict[str, Any] | None:
     Both the task and the target index are required: reattaching to a task that
     is filling index A while this attempt swaps index B would publish an empty
     index. Absent either, the attempt starts cleanly.
+
+    The target also covers an attempt that died *after* the swap: the retry
+    finds the alias already on that target and only finishes the bookkeeping.
     """
     try:
         details = activity.info().heartbeat_details
@@ -72,7 +83,12 @@ def _resume_from_heartbeat() -> dict[str, Any] | None:
     task_id, target = last.get("task_id"), last.get("target_index")
     if not (task_id and target):
         return None
-    return {"task_id": task_id, "target_index": target}
+    resume = {"task_id": task_id, "target_index": target}
+    # Optional: what the alias pointed at before. Lets a retry that finds the
+    # swap already made still drop the old index if it was asked to.
+    if source := last.get("source_index"):
+        resume["source_index"] = source
+    return resume
 
 
 def _classified(exc: FetchError) -> ApplicationError:
@@ -201,52 +217,64 @@ class PipelineActivities:
 
     # --- resolution --------------------------------------------------------
 
-    @activity.defn(name="resolve_duplicates")
-    async def resolve_duplicates(
-        self, companies: list[EnrichedCompany], adjudicate: bool = True
-    ) -> list[EnrichedCompany]:
-        """Cluster duplicates, optionally using the LLM on borderline pairs."""
-        records = [c.company for c in companies]
-        activity.heartbeat({"stage": "resolve", "count": len(records)})
+    @activity.defn(name="resolve_index")
+    async def resolve_index(self, alias: str | None = None, since: str | None = None) -> int:
+        """Cluster duplicates across everything behind the alias.
 
-        from ..resolution.entity import generate_candidates
+        Once per crawl, after every batch has indexed. Per-batch resolution
+        could only compare records that happened to share a batch of 25 --
+        and with incremental crawl, a batch holds only the pages that
+        changed, so a changed duplicate was compared to nothing and written
+        back as canonical.
 
-        # Scored once and handed to `resolve`. It recomputes the set otherwise,
-        # which on 100k records is a minute of scoring 3.8M pairs a second
-        # time -- see scripts/bench_resolution.py.
-        candidates = generate_candidates(records)
+        `since` (ISO-8601) is when the crawl started. Borderline pairs where
+        neither side was written since keep the verdict already in the
+        index, so the adjudicator is paid for what changed, not for the size
+        of the corpus. Returns how many records are now duplicates.
+        """
+        since_at = datetime.fromisoformat(since) if since else None
+        activity.heartbeat({"stage": "resolve", "step": "load"})
+        rows = await self.index.load_for_resolution(
+            alias=alias,
+            since=since_at,
+            on_page=lambda n: activity.heartbeat({"stage": "resolve", "loaded": n}),
+        )
+        records = [row.record for row in rows]
 
-        accepted: list[Candidate] = []
-        if adjudicate and self.adjudicator.enabled:
-            borderline = [c for c in candidates if c.needs_review]
-            if borderline:
-                log.info("activity.adjudicating", pairs=len(borderline))
-                accepted = await self.adjudicator.adjudicate_many(borderline)
+        activity.heartbeat({"stage": "resolve", "step": "score", "records": len(records)})
+        # In a thread: scoring 100k records is about a minute of pure CPU, and
+        # on the event loop it would starve the heartbeats that tell Temporal
+        # this worker is still alive.
+        candidates = await asyncio.to_thread(generate_candidates, records)
+
+        reused, fresh = split_borderline(candidates, rows)
+        accepted: list[Candidate] = list(reused)
+        if fresh and self.adjudicator.enabled:
+            log.info("activity.adjudicating", pairs=len(fresh), reused=len(reused))
+            activity.heartbeat({"stage": "resolve", "step": "adjudicate", "pairs": len(fresh)})
+            accepted.extend(await self.adjudicator.adjudicate_many(fresh))
 
         cluster_of, canonical_of = resolve(records, accepted=accepted, candidates=candidates)
+        updates = cluster_updates(rows, cluster_of, canonical_of)
+        activity.heartbeat({"stage": "resolve", "step": "write", "updates": len(updates)})
+        await self.index.apply_clusters(updates, alias=alias)
 
-        out: list[EnrichedCompany] = []
-        collapsed = 0
-        for company in companies:
-            rid = company.company.record_id
-            canonical = canonical_of.get(rid, rid)
-            if canonical != rid:
-                collapsed += 1
-            out.append(
-                company.model_copy(
-                    update={
-                        "cluster_id": cluster_of.get(rid, rid),
-                        "duplicate_of": None if canonical == rid else canonical,
-                    }
-                )
-            )
-        log.info("activity.resolved", records=len(records), duplicates=collapsed)
-        return out
+        duplicates = sum(1 for rid, canonical in canonical_of.items() if canonical != rid)
+        log.info(
+            "activity.resolved",
+            records=len(records),
+            duplicates=duplicates,
+            changed=len(updates),
+            touched=sum(1 for row in rows if row.touched),
+        )
+        return duplicates
 
     # --- indexing ----------------------------------------------------------
 
     @activity.defn(name="bootstrap_index")
-    async def bootstrap_index(self, alias: str) -> str:
+    async def bootstrap_index(self, alias: str | None = None) -> str:
+        # None means the configured alias -- the same default index_documents
+        # and content_hashes use, so all three agree on where writes go.
         return await self.index.bootstrap(alias)
 
     @activity.defn(name="index_documents")

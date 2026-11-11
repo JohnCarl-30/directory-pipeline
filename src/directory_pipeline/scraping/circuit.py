@@ -61,6 +61,21 @@ class Breaker:
             self._half_open_inflight = 0
             self.state = State.CLOSED
 
+    def release_trial(self) -> None:
+        """Hand back a half-open trial slot without reporting an outcome.
+
+        For a request that ended in neither success nor failure -- cancelled,
+        or failed for a reason that says nothing about the host. Without it the
+        slot is held forever: the breaker stays half-open, every later request
+        is refused, and only a worker restart clears it.
+
+        Synchronous on purpose. It runs from an `except` handling cancellation,
+        where awaiting the lock is one more place to be cancelled; with no
+        await between the read and the write, asyncio cannot interleave it.
+        """
+        if self.state is State.HALF_OPEN and self._half_open_inflight > 0:
+            self._half_open_inflight -= 1
+
     async def on_failure(self) -> None:
         async with self._lock:
             self.failures += 1

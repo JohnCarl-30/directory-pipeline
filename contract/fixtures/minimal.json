@@ -362,7 +362,8 @@
         "index_alias": null,
         "force_refetch": false,
         "pending_urls": [],
-        "carried_totals": {}
+        "carried_totals": {},
+        "crawl_started_at": null
       },
       "now_fields": []
     },

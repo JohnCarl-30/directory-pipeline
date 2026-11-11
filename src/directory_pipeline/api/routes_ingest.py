@@ -5,8 +5,10 @@ handle. None of them do the work in-process: a crawl runs for minutes to hours,
 and an HTTP request is the wrong place to hold that.
 
 Workflow ids are caller-supplied or deterministic, which makes the endpoints
-idempotent -- POSTing the same crawl twice attaches to the running one instead
-of starting a second.
+idempotent while the work runs: POSTing the same crawl twice answers with the
+running one (`status: "already_running"`) instead of starting a second. Once a
+crawl has finished, the same POST starts a new one -- re-crawling later is the
+point of a crawl.
 """
 
 from __future__ import annotations
@@ -15,6 +17,7 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
+from temporalio.exceptions import WorkflowAlreadyStartedError
 from temporalio.service import RPCError
 
 from ..domain.models import CrawlRequest, ReindexRequest
@@ -28,6 +31,25 @@ class WorkflowHandleResponse(BaseModel):
     workflow_id: str
     run_id: str
     status: str = "started"
+
+
+async def _start_once(
+    client: Any, run: Any, arg: Any, *, wid: str, task_queue: str
+) -> WorkflowHandleResponse:
+    """Start a workflow, or report the one already running under that id.
+
+    Temporal refuses a second start of a running id, which is the dedupe this
+    module relies on -- but the refusal is an exception, and uncaught it turned
+    a client's harmless retry into a 500.
+    """
+    try:
+        handle = await client.start_workflow(run, arg, id=wid, task_queue=task_queue)
+    except WorkflowAlreadyStartedError as exc:
+        METRICS.incr("api.workflow_already_running")
+        return WorkflowHandleResponse(
+            workflow_id=wid, run_id=getattr(exc, "run_id", None) or "", status="already_running"
+        )
+    return WorkflowHandleResponse(workflow_id=handle.id, run_id=handle.result_run_id or "")
 
 
 class WorkflowStatusResponse(BaseModel):
@@ -50,17 +72,20 @@ async def start_crawl(
     payload = request.model_copy(
         update={"index_alias": request.index_alias or resources.settings.opensearch_alias}
     )
-    # Deterministic id -> re-POSTing the same crawl is a no-op, not a duplicate.
+    # Deterministic id -> re-POSTing a crawl that is still running returns it
+    # rather than starting a duplicate.
     wid = workflow_id or f"crawl-{payload.source}-{'-'.join(sorted(payload.categories))}"
 
-    handle = await client.start_workflow(
+    response = await _start_once(
+        client,
         CrawlDirectoryWorkflow.run,
         payload,
-        id=wid,
+        wid=wid,
         task_queue=resources.settings.temporal_task_queue,
     )
-    METRICS.incr("api.crawls_started")
-    return WorkflowHandleResponse(workflow_id=handle.id, run_id=handle.result_run_id or "")
+    if response.status == "started":
+        METRICS.incr("api.crawls_started")
+    return response
 
 
 @router.post("/reindex", response_model=WorkflowHandleResponse, status_code=202)
@@ -72,14 +97,16 @@ async def start_reindex(
     """Kick off a zero-downtime reindex behind the alias."""
     from ..orchestration.workflows import ReindexWorkflow
 
-    handle = await client.start_workflow(
+    response = await _start_once(
+        client,
         ReindexWorkflow.run,
         request,
-        id=f"reindex-{request.alias}-{request.target_schema_version}",
+        wid=f"reindex-{request.alias}-{request.target_schema_version}",
         task_queue=resources.settings.temporal_task_queue,
     )
-    METRICS.incr("api.reindexes_started")
-    return WorkflowHandleResponse(workflow_id=handle.id, run_id=handle.result_run_id or "")
+    if response.status == "started":
+        METRICS.incr("api.reindexes_started")
+    return response
 
 
 @router.get("/workflows/{workflow_id}", response_model=WorkflowStatusResponse)

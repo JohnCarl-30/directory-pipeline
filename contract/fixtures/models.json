@@ -378,7 +378,8 @@
         "carried_totals": {
           "pages_crawled": 7,
           "documents_indexed": 12
-        }
+        },
+        "crawl_started_at": "2026-03-09T08:00:00.000005+08:00"
       }
     },
     {

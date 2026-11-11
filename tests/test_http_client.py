@@ -134,3 +134,129 @@ def test_all_proxies_parked_resets_rather_than_leaking_real_ip():
 )
 def test_parse_retry_after(header, expected):
     assert _parse_retry_after(header) == expected
+
+
+# --- redirects ----------------------------------------------------------------
+
+
+@respx.mock
+async def test_redirects_are_followed_hop_by_hop():
+    first = respx.get("http://t.test/old").mock(
+        return_value=httpx.Response(301, headers={"Location": "/new"})
+    )
+    second = respx.get("http://t.test/new").mock(return_value=httpx.Response(200, text="moved"))
+    async with ResilientClient(fast_settings(), base_backoff_s=0.001) as client:
+        response = await client.get("http://t.test/old")
+    assert response.status == 200
+    assert response.text == "moved"
+    assert response.url == "http://t.test/new"
+    assert first.call_count == 1 and second.call_count == 1
+
+
+@respx.mock
+async def test_a_redirect_into_a_disallowed_path_is_never_fetched():
+    """The hop is a new URL, so robots.txt is asked again -- not just for the first."""
+    from directory_pipeline.scraping.client import RobotsDisallowedError
+
+    respx.get("http://t.test/robots.txt").mock(
+        return_value=httpx.Response(200, text="User-agent: *\nDisallow: /private/\n")
+    )
+    respx.get("http://t.test/company/x").mock(
+        return_value=httpx.Response(302, headers={"Location": "/private/x"})
+    )
+    private = respx.get("http://t.test/private/x").mock(return_value=httpx.Response(200))
+    settings = Settings(crawl_rps=1000.0, crawl_burst=1000, request_timeout_s=2.0)
+    async with ResilientClient(settings, base_backoff_s=0.001) as client:
+        with pytest.raises(RobotsDisallowedError):
+            await client.get("http://t.test/company/x")
+    assert private.call_count == 0
+
+
+@respx.mock
+async def test_a_cross_host_redirect_reads_the_other_hosts_robots_txt():
+    respx.get("http://a.test/robots.txt").mock(return_value=httpx.Response(404))
+    respx.get("http://a.test/x").mock(
+        return_value=httpx.Response(302, headers={"Location": "http://b.test/x"})
+    )
+    other_robots = respx.get("http://b.test/robots.txt").mock(
+        return_value=httpx.Response(200, text="User-agent: *\nDisallow: /\n")
+    )
+    target = respx.get("http://b.test/x").mock(return_value=httpx.Response(200))
+    settings = Settings(crawl_rps=1000.0, crawl_burst=1000, request_timeout_s=2.0)
+    async with ResilientClient(settings, base_backoff_s=0.001) as client:
+        with pytest.raises(FetchError):
+            await client.get("http://a.test/x")
+    assert other_robots.call_count == 1
+    assert target.call_count == 0
+
+
+@respx.mock
+async def test_a_redirect_loop_is_terminal():
+    respx.get("http://t.test/loop").mock(
+        return_value=httpx.Response(302, headers={"Location": "/loop"})
+    )
+    async with ResilientClient(fast_settings(), base_backoff_s=0.001) as client:
+        with pytest.raises(FetchError) as exc:
+            await client.get("http://t.test/loop")
+    assert exc.value.retryable is False
+
+
+@respx.mock
+async def test_303_turns_a_post_into_a_get_without_the_body():
+    respx.post("http://t.test/form").mock(
+        return_value=httpx.Response(303, headers={"Location": "/done"})
+    )
+    done = respx.get("http://t.test/done").mock(return_value=httpx.Response(200, text="ok"))
+    async with ResilientClient(fast_settings(), base_backoff_s=0.001) as client:
+        response = await client.request("POST", "http://t.test/form", json={"a": 1})
+    assert response.status == 200
+    assert done.calls.last.request.content == b""
+
+
+# --- the breaker's half-open slot -----------------------------------------------
+
+
+async def _half_open(client: ResilientClient, host: str):
+    from directory_pipeline.scraping.circuit import State
+
+    breaker = client.breakers.get(host)
+    breaker.state = State.OPEN
+    breaker.opened_at = 0.0  # long past the reset timeout
+    return breaker
+
+
+@respx.mock
+async def test_a_cancelled_trial_request_hands_the_half_open_slot_back():
+    """A trial that is cancelled must not leave the host refused forever."""
+    import asyncio
+
+    started = asyncio.Event()
+
+    async def hang(request):
+        started.set()
+        await asyncio.sleep(60)
+
+    respx.get("http://t.test/slow").mock(side_effect=hang)
+    respx.get("http://t.test/fast").mock(return_value=httpx.Response(200, text="ok"))
+    async with ResilientClient(fast_settings(), base_backoff_s=0.001) as client:
+        await _half_open(client, "t.test")
+        task = asyncio.create_task(client.get("http://t.test/slow"))
+        await started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        # Before the fix this raised CircuitOpenError for the life of the worker.
+        assert (await client.get("http://t.test/fast")).status == 200
+        assert client.breakers.snapshot()["t.test"] == "closed"
+
+
+@respx.mock
+async def test_a_non_transport_httpx_error_is_a_terminal_fetch_error():
+    respx.get("http://t.test/bad").mock(side_effect=httpx.DecodingError("garbled"))
+    respx.get("http://t.test/fast").mock(return_value=httpx.Response(200, text="ok"))
+    async with ResilientClient(fast_settings(), base_backoff_s=0.001) as client:
+        await _half_open(client, "t.test")
+        with pytest.raises(FetchError) as exc:
+            await client.get("http://t.test/bad")
+        assert exc.value.retryable is False
+        assert (await client.get("http://t.test/fast")).status == 200
